@@ -127,6 +127,103 @@ html, body {
   background-color: var(--success);
 }
 
+/* Green when ready (above), amber while connecting, grey when stopped. */
+.status-indicator:not([data-state="ready"]) {
+  background-color: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+
+.status-indicator:not([data-state="ready"]) .pulse-dot {
+  background-color: var(--amber);
+}
+
+.status-indicator[data-state="stopped"],
+.status-indicator[data-state="signed_out"] {
+  background-color: var(--bg-hover);
+  border-color: var(--border);
+  color: var(--text-secondary);
+}
+
+.status-indicator[data-state="stopped"] .pulse-dot,
+.status-indicator[data-state="signed_out"] .pulse-dot {
+  background-color: var(--text-muted);
+}
+
+/* ==========================================================================
+   Account Bar
+   ========================================================================== */
+.account-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 14px;
+  background-color: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.account-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.account-email {
+  font-weight: 600;
+  color: var(--text-main);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.conn-detail {
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.account-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.btn-account {
+  font: inherit;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background-color: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.btn-account:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-main);
+}
+
+.btn-account.primary {
+  background-color: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff;
+}
+
+.btn-account.primary:hover {
+  background-color: var(--primary-hover);
+}
+
+.btn-account:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .btn-ghost-icon {
   background: transparent;
   border: none;
@@ -346,6 +443,7 @@ html, body {
 
 .user-prompt-card {
   align-self: flex-end;
+  overflow-wrap: anywhere;
   background-color: #ffffff;
   border: 1px solid #cbd5e1;
   border-radius: var(--radius-md) var(--radius-md) 2px var(--radius-md);
@@ -358,6 +456,7 @@ html, body {
 }
 
 .agent-result-card {
+  min-width: 0;
   background-color: #ffffff;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -396,6 +495,7 @@ html, body {
   font-size: 12px;
   color: var(--text-secondary);
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .result-body strong {
@@ -533,9 +633,54 @@ html, body {
   color: var(--text-muted);
 }
 
+.keyboard-tip[data-state="listening"] {
+  color: #dc2626;
+  font-weight: 500;
+}
+
+.keyboard-tip[data-state="error"] {
+  color: #b45309;
+}
+
 .bar-right {
   display: flex;
   align-items: center;
+  gap: 6px;
+}
+
+.btn-mic {
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.btn-mic[hidden] {
+  display: none;
+}
+
+.btn-mic:hover {
+  background: var(--bg-hover);
+  color: var(--text-main);
+}
+
+.btn-mic[data-listening="true"] {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #dc2626;
+  animation: mic-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.35); }
+  50% { box-shadow: 0 0 0 4px rgba(220, 38, 38, 0); }
 }
 
 .btn-submit {
@@ -600,4 +745,245 @@ html, body {
 .menu-item span {
   color: var(--text-secondary);
   font-size: 11px;
+}
+
+/* ==========================================================================
+   Agent Run Log
+   ========================================================================== */
+.run-badge[data-state="running"] {
+  color: var(--primary);
+  background-color: var(--primary-light);
+}
+
+.run-badge[data-state="error"] {
+  color: #b91c1c;
+  background-color: #fef2f2;
+}
+
+.run-log {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.run-log:empty {
+  display: none;
+}
+
+.run-log-item {
+  padding-left: 14px;
+  position: relative;
+  overflow-wrap: anywhere;
+}
+
+.run-log-item::before {
+  content: "•";
+  position: absolute;
+  left: 2px;
+  color: var(--text-muted);
+}
+
+.run-log-item.plan {
+  color: var(--text-main);
+  font-weight: 500;
+}
+
+.run-log-item.tool {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+}
+
+.run-log-item.tool.pending::before {
+  content: "…";
+  color: var(--amber);
+}
+
+.run-log-item.tool.ok::before {
+  content: "✓";
+  color: var(--success);
+}
+
+.run-log-item.tool.failed {
+  color: #b91c1c;
+}
+
+.run-log-item.tool.failed::before {
+  content: "✗";
+  color: #dc2626;
+}
+
+.run-log-item[data-progress]::after {
+  content: "  " attr(data-progress);
+  color: var(--amber);
+}
+
+.run-answer {
+  white-space: pre-wrap;
+}
+
+.run-answer:empty {
+  display: none;
+}
+
+/* ==========================================================================
+   Approval Cards
+   ========================================================================== */
+.approval-card {
+  border-left: 3px solid var(--amber);
+}
+
+.approval-badge {
+  color: #b45309;
+  background-color: #fef3c7;
+}
+
+.approval-origin {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 4px 0 8px;
+  word-break: break-all;
+}
+
+.approval-outcome {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.approval-outcome.approved {
+  color: #059669;
+}
+
+.approval-outcome.denied {
+  color: #dc2626;
+}
+
+/* ==========================================================================
+   Run Card (plan checklist, tool log, answer)
+   ========================================================================== */
+.run-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.run-meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.run-badge[data-state="done"] {
+  color: #065f46;
+  background-color: var(--success-light);
+}
+
+.run-plan {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background-color: var(--bg-app);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-main);
+}
+
+.run-plan:empty {
+  display: none;
+}
+
+.run-plan-item {
+  position: relative;
+  padding-left: 18px;
+}
+
+.run-plan-item::before {
+  position: absolute;
+  left: 0;
+  font-weight: 700;
+}
+
+.run-plan-item[data-state="pending"] { color: var(--text-muted); }
+.run-plan-item[data-state="pending"]::before { content: "○"; }
+.run-plan-item[data-state="working"]::before { content: "◐"; color: var(--primary); }
+.run-plan-item[data-state="done"]::before { content: "✓"; color: var(--success); }
+.run-plan-item[data-state="failed"]::before { content: "✗"; color: #dc2626; }
+
+.run-log-item.tool {
+  font-family: inherit;
+  font-size: 11.5px;
+  color: var(--text-main);
+}
+
+.run-log-detail {
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.run-log-item.tool.failed .run-log-detail {
+  color: #b91c1c;
+}
+
+.run-log-item.step.retry,
+.run-log-item.step.not-done {
+  color: #92400e;
+  font-style: italic;
+}
+
+.run-log-item.step.saved {
+  color: var(--success);
+}
+
+.run-log-item[data-progress]::after {
+  display: block;
+  font-size: 10.5px;
+}
+
+.run-answer-box {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.run-answer-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.run-answer-box .run-answer {
+  font-size: 12.5px;
+  color: var(--text-main);
+}
+
+.run-answer-box.error .run-answer {
+  color: #b91c1c;
+  white-space: pre-wrap;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.input-textarea:disabled,
+.btn-submit:disabled,
+.btn-mic:disabled,
+.action-card:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Agent cursor toggle */
+.btn-cursor[aria-pressed="true"] {
+  color: var(--primary);
+  background-color: var(--primary-light);
 }

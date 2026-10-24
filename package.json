@@ -4,6 +4,10 @@
   "type": "module",
   "packageManager": "pnpm@12.15.0",
   "engines": { "node": ">=22" },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "dev:server": "pnpm --filter @bigfish/server dev",
     "dev:ext": "pnpm --filter @bigfish/extension dev",

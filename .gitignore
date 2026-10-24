@@ -8,6 +8,8 @@ dist/
 .wxt/
 *.tsbuildinfo
 coverage/
+test-results/
+playwright-report/
 *.zip
 
 # Env and secrets (never commit)

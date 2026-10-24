@@ -1,7 +1,9 @@
 // BigFish Action Policy: detects risky operations that require human approval.
 // Examples: clicking "Send", "Pay", "Delete", "Confirm", "Submit", or typing Enter in critical forms.
 
-const RISKY_LABEL_REGEX = /\b(send|pay|buy|purchase|delete|remove|destroy|submit order|checkout|transfer|grant|authorize|sign)\b/i;
+// "sign" alone means signing something; "Sign in / up / out" is not risky.
+const RISKY_LABEL_REGEX =
+  /\b(send|pay|buy|purchase|delete|remove|destroy|submit order|place order|checkout|transfer|grant|authorize|publish|sign(?!\s*(?:in|up|out)\b))\b/i;
 const SEARCH_HINT_REGEX = /\b(search|find|query|filter|lookup)\b/i;
 
 export interface ActionDescriptor {

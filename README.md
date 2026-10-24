@@ -8,16 +8,17 @@ Full plan: [`Docs/Plan.md`](Docs/Plan.md).
 
 ## Status
 
-Early skeleton. Most files are stubs.
+Working end to end on a real browser: sign in, connect, run an agent prompt, use all 13 browser tools.
 
 | Part | State |
 |---|---|
 | Monorepo, workspace, TypeScript config | Done |
 | Server: `/health`, Google login, `/mcp-ws` (extension is the MCP server, server is the MCP client) | Running |
 | Server: device sessions per user (max 3), tool calls one at a time per device | Running |
-| Server: agent (graph, models, tinyfish, tools) | Not built yet |
+| Server: agent (LangGraph plan, act, verify, finalize on Mistral), SSE run API with cancel | Running |
+| Server: TinyFish cloud research | Not built yet |
 | Extension: Google sign-in, MCP connection with reconnect, side panel account bar | Running |
-| Extension: safety modules | Files present, not wired |
+| Extension: 13 browser tools, refs + deltas, PII vault, approvals (side panel or popup), URL policy | Running |
 | Auth: Google token -> JWT -> one-time ticket for `/mcp-ws` | Running |
 | ML | Roadmap only |
 
@@ -28,7 +29,8 @@ Early skeleton. Most files are stubs.
 | `packages/contracts` | Shared zod tool schemas, wire protocol, error codes |
 | `packages/mcp-ws` | MCP over one WebSocket: framing, handshake, heartbeats (used by server and extension) |
 | `apps/extension` | WXT Chrome extension (background, content, side panel, safety) |
-| `apps/server` | Node + Hono server on `127.0.0.1:8787` (`/health`, `/api/auth/google`, `/api/ws-ticket`, `/api/devices`, `/mcp-ws`) |
+| `apps/server` | Node + Hono server on `127.0.0.1:8787` (`/health`, `/api/auth/google`, `/api/ws-ticket`, `/api/devices`, `/api/agent/*`, `/mcp-ws`) |
+| `apps/server/fixtures` | Local test pages for the E2E tests |
 | `ML` | Python (uv) ML experiments, roadmap only |
 | `Docs` | Build plan |
 | `scripts` | Helper scripts (empty for now) |
@@ -63,8 +65,9 @@ All live in `apps/server/.env`.
 |---|---|---|
 | `PORT` | `8787` | Server port. Read today |
 | `HOST` | `127.0.0.1` | Bind address. Keep it local. Read today |
-| `MISTRAL_API_KEY` | empty | Mistral key for the agent model. Used once the agent is built |
-| `AGENT_MODEL` | `mistral-medium-latest` | Mistral model for the agent (must support tool calling). Used once the agent is built |
+| `MISTRAL_API_KEY` | empty | Mistral key for the agent. Without it `/api/agent/invoke` answers 503 |
+| `AGENT_MODEL` | `mistral-medium-latest` | Mistral model for the agent (must support tool calling) |
+| `AGENT_JUDGE_MODEL` | `mistral-small-latest` | Cheaper model that checks each subtask |
 | `TINYFISH_API_KEY` | empty | TinyFish key for public web research. Used once the agent is built |
 | `TINYFISH_REPLAY` | `0` | `1` replays cached TinyFish runs |
 | `GOOGLE_EXTENSION_CLIENT_ID` | empty | Google OAuth client (type "Chrome Extension"). Required unless dev routes are on |
@@ -90,10 +93,10 @@ Check the server:
 
 ```bash
 curl http://127.0.0.1:8787/health
-# {"ok":true,"name":"bigfish","bridge":false}
+# {"ok":true,"name":"bigfish","devices":1,"runs":0}
 ```
 
-`bridge: false` is expected until the bridge is built.
+`devices` is 1 once the extension is signed in and connected.
 
 ### Load the extension by hand (optional)
 
@@ -116,6 +119,9 @@ Run from the repo root.
 | `pnpm build` | Build all packages |
 | `pnpm typecheck` | Typecheck all packages |
 | `pnpm --filter @bigfish/extension zip` | Zip the extension for upload |
+| `pnpm --filter @bigfish/server test` | Server tests: MCP pipe, login, agent run loop (fake extension, scripted model) |
+| `pnpm --filter @bigfish/extension test` | Safety unit tests: PII, rehydration, action and URL policy |
+| `pnpm --filter @bigfish/extension e2e` | Playwright E2E: Chromium + built extension + server + fixture pages. First run: `pnpm --filter @bigfish/extension exec playwright install chromium` |
 
 ## ML (optional)
 

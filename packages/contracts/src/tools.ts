@@ -35,13 +35,14 @@ export const TOOLS: ToolContract[] = [
   },
   {
     name: "browser_snapshot",
-    description: "Compact view of the page interactive elements or text.",
+    description: "Compact view of the page interactive elements or text. from_end=true reads the newest text, like the latest chat reply.",
     input: z.object({
       tab: z.number().optional(),
       mode: z.enum(["interactive", "text"]).optional().default("interactive"),
       within: z.string().optional(),
       max_chars: z.number().optional().default(3000),
       offset: z.number().optional().default(0),
+      from_end: z.boolean().optional(),
     }),
     annotations: { readOnlyHint: true },
   },
@@ -113,12 +114,13 @@ export const TOOLS: ToolContract[] = [
   },
   {
     name: "browser_wait_for",
-    description: "Wait until text, URL, or element condition is met.",
+    description: "Wait for text, URL, an element, or idle=true: the page stopped changing (a chat reply finished). Max 60000 ms.",
     input: z.object({
       text: z.string().optional(),
       gone_text: z.string().optional(),
       url_contains: z.string().optional(),
       ref: z.string().optional(),
+      idle: z.boolean().optional(),
       timeout_ms: z.number().optional().default(5000),
     }),
     annotations: { readOnlyHint: true },

@@ -15,8 +15,18 @@ export function buildMcpServer(): McpServer {
       tool.name,
       { description: tool.description, inputSchema: tool.input, annotations: tool.annotations },
       async (args, ctx) => {
-        const meta = ctx.mcpReq._meta as { runId?: string } | undefined;
-        const res = await executor.execute(tool.name, args, "mcp", { signal: ctx.mcpReq.signal, runId: meta?.runId });
+        const meta = ctx.mcpReq._meta as { runId?: string; progressToken?: string | number } | undefined;
+        // Progress keeps the server's timeout from firing while the user decides on an approval.
+        let step = 0;
+        const progressToken = meta?.progressToken;
+        const onProgress =
+          progressToken === undefined
+            ? undefined
+            : (message: string) =>
+                void ctx.mcpReq
+                  .notify({ method: "notifications/progress", params: { progressToken, progress: ++step, message } })
+                  .catch(() => {});
+        const res = await executor.execute(tool.name, args, "mcp", { signal: ctx.mcpReq.signal, runId: meta?.runId, onProgress });
         return { content: [{ type: "text" as const, text: res.text }], isError: !res.ok };
       },
     );

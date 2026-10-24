@@ -1,7 +1,8 @@
 // BigFish service worker: Google login, the MCP connection to the server,
 // tab tracking, side panel behavior, and approvals.
 import { tabsManager } from "./tabs.js";
-import { currentEmail, signIn, signOut } from "./auth.js";
+import { currentEmail, getAuth, signIn, signOut } from "./auth.js";
+import { SERVER_URL, getDeviceId } from "./config.js";
 import { Connection } from "./conn/connection.js";
 import { approvals } from "../../safety/approval.js";
 
@@ -35,21 +36,24 @@ export default defineBackground(() => {
     if (tab.id) tabsManager.registerTab(tab.id);
   });
 
-  // Relay approval requests to side panel or popup window
-  approvals.onApprovalRequested(async (req) => {
-    try {
-      browser.runtime.sendMessage({ type: "BIGFISH_APPROVAL_REQUEST", payload: req }).catch(() => {
-        // If side panel is not open, open popup approval window
-        browser.windows.create({
-          url: browser.runtime.getURL(`/sidepanel.html?approvalId=${req.id}`),
-          type: "popup",
-          width: 420,
-          height: 520,
-        });
+  // Approval requests go to the side panel. With no panel open, a small popup asks instead.
+  const approvalPopups = new Map<string, number>();
+  approvals.onApprovalRequested((req) => {
+    browser.runtime.sendMessage({ type: "BIGFISH_APPROVAL_REQUEST", payload: req }).catch(async () => {
+      const popup = await browser.windows.create({
+        url: browser.runtime.getURL(`/sidepanel.html?approvalId=${encodeURIComponent(req.id)}`),
+        type: "popup",
+        width: 420,
+        height: 360,
       });
-    } catch (e) {
-      console.warn("[BigFish] Failed to broadcast approval", e);
-    }
+      if (popup?.id !== undefined) approvalPopups.set(req.id, popup.id);
+    });
+  });
+  approvals.onApprovalClosed((id) => {
+    browser.runtime.sendMessage({ type: "BIGFISH_APPROVAL_CLOSED", id }).catch(() => {});
+    const windowId = approvalPopups.get(id);
+    approvalPopups.delete(id);
+    if (windowId !== undefined) void browser.windows.remove(windowId).catch(() => {});
   });
 
   // Messages from the side panel. Async handlers answer through sendResponse.
@@ -65,6 +69,9 @@ export default defineBackground(() => {
     switch (msg?.type) {
       case "RESOLVE_APPROVAL":
         sendResponse({ ok: approvals.resolveDecision(msg.id, msg.approved) });
+        return false;
+      case "BIGFISH_GET_APPROVAL":
+        sendResponse({ ok: true, request: approvals.getPending(msg.id) ?? null });
         return false;
       case "KILL_SWITCH":
         return reply(connection.kill());
@@ -85,6 +92,11 @@ export default defineBackground(() => {
         return reply(signOut().then(statusPayload));
       case "BIGFISH_CONNECT":
         return reply(connection.resume().then(statusPayload));
+      // What the side panel needs to call the agent API itself.
+      case "BIGFISH_AGENT_CONTEXT":
+        return reply(
+          Promise.all([getAuth(), getDeviceId()]).then(([auth, deviceId]) => ({ token: auth.token, deviceId, serverUrl: SERVER_URL })),
+        );
       default:
         return false;
     }

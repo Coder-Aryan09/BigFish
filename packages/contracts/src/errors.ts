@@ -19,6 +19,7 @@ export const ErrorCode = {
   INVALID_ARGS: "INVALID_ARGS",
   UNKNOWN_TOOL: "UNKNOWN_TOOL",
   STATE_UNKNOWN: "STATE_UNKNOWN",
+  LOOP: "LOOP",
 } as const;
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
 
@@ -28,6 +29,9 @@ export const ApiErrorCode = {
   INVALID_GOOGLE_TOKEN: "INVALID_GOOGLE_TOKEN",
   AUTH_NOT_CONFIGURED: "AUTH_NOT_CONFIGURED",
   BAD_REQUEST: "BAD_REQUEST",
+  NOT_FOUND: "NOT_FOUND",
+  RUN_IN_PROGRESS: "RUN_IN_PROGRESS",
+  AGENT_NOT_CONFIGURED: "AGENT_NOT_CONFIGURED",
 } as const;
 export type ApiErrorCode = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];
 

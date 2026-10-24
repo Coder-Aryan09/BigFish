@@ -8,33 +8,16 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { CloseCode, ErrorCode, TOOLS, WIRE_VERSION, encodeCtl } from "@bigfish/contracts";
 import { FramedTransport, SocketOpenError, openMcpSocket } from "@bigfish/mcp-ws";
 import { startServer } from "../src/server.js";
-import type { AuthConfig } from "../src/auth/config.js";
-import { GoogleTokenError } from "../src/auth/google.js";
 import { issueUserJwt } from "../src/auth/jwt.js";
 import { SessionError } from "../src/mcp/session.js";
 import { MAX_DEVICES_PER_USER } from "../src/mcp/registry.js";
 import { DEV_USER_ID } from "../src/routes/dev.routes.js";
-import { startFakeExtension, ticketUrl, withOrigin, type FakeExtensionOptions } from "../scripts/fake-extension.js";
-
-// Short timings so failure paths finish fast.
-const TUNING = { helloTimeoutMs: 300, heartbeatIntervalMs: 100, heartbeatDeadlineMs: 500 };
-const ORIGIN = "chrome-extension://test-extension-id";
-const USER = "google:user-1";
-const OriginWebSocket = withOrigin(ORIGIN);
-
-// Fake Google: "good-<sub>" is a valid token for user <sub>, anything else is rejected.
-const auth: AuthConfig = {
-  jwtSecret: new TextEncoder().encode("test-secret-test-secret-test-secret"),
-  extensionOrigin: ORIGIN,
-  verifyGoogleToken: async (accessToken) => {
-    if (!accessToken.startsWith("good-")) throw new GoogleTokenError("bad token");
-    const sub = accessToken.slice(5);
-    return { sub, email: `${sub}@example.com` };
-  },
-};
+import { withOrigin } from "../scripts/fake-extension.js";
+import { OriginWebSocket, TUNING, USER, auth, jwtFor, testBed, textOf, waitFor } from "./helpers.js";
 
 let srv: Awaited<ReturnType<typeof startServer>>;
 let httpUrl: string;
+const { urlFor, fake, session } = testBed(() => srv);
 
 before(async () => {
   srv = await startServer({ port: 0, host: "127.0.0.1", devRoutes: true, socket: TUNING, auth });
@@ -44,40 +27,6 @@ before(async () => {
 after(async () => {
   await srv.close();
 });
-
-async function jwtFor(userId: string): Promise<string> {
-  return (await issueUserJwt(auth.jwtSecret, { userId, email: `${userId}@example.com` })).token;
-}
-
-const urlFor = async (userId = USER) => ticketUrl(httpUrl, await jwtFor(userId));
-
-async function fake(opts: Omit<FakeExtensionOptions, "url"> & { userId?: string } = {}) {
-  const { userId, ...rest } = opts;
-  return startFakeExtension({
-    url: await urlFor(userId),
-    origin: ORIGIN,
-    heartbeatIntervalMs: TUNING.heartbeatIntervalMs,
-    heartbeatDeadlineMs: TUNING.heartbeatDeadlineMs,
-    ...rest,
-  });
-}
-
-async function waitFor<T>(fn: () => T | undefined, timeoutMs = 2_000): Promise<T> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const value = fn();
-    if (value !== undefined) return value;
-    await new Promise((r) => setTimeout(r, 10));
-  }
-  throw new Error("waitFor timed out");
-}
-
-const session = (deviceId: string, userId = USER) => waitFor(() => srv.registry.get(userId, deviceId));
-
-function textOf(result: { content: unknown }): string {
-  const blocks = result.content as Array<{ type: string; text?: string }>;
-  return blocks.map((b) => b.text ?? "").join("");
-}
 
 // A raw socket for protocol-level tests. Resolves with the close code.
 async function rawSocket(onOpen: (ws: WebSocket) => void): Promise<number> {

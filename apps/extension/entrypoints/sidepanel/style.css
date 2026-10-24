@@ -698,3 +698,234 @@ html, body {
   color: var(--text-secondary);
   font-size: 11px;
 }
+
+/* ==========================================================================
+   Agent Run Log
+   ========================================================================== */
+.run-badge[data-state="running"] {
+  color: var(--primary);
+  background-color: var(--primary-light);
+}
+
+.run-badge[data-state="error"] {
+  color: #b91c1c;
+  background-color: #fef2f2;
+}
+
+.run-log {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.run-log:empty {
+  display: none;
+}
+
+.run-log-item {
+  padding-left: 14px;
+  position: relative;
+  word-break: break-word;
+}
+
+.run-log-item::before {
+  content: "•";
+  position: absolute;
+  left: 2px;
+  color: var(--text-muted);
+}
+
+.run-log-item.plan {
+  color: var(--text-main);
+  font-weight: 500;
+}
+
+.run-log-item.tool {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+}
+
+.run-log-item.tool.pending::before {
+  content: "…";
+  color: var(--amber);
+}
+
+.run-log-item.tool.ok::before {
+  content: "✓";
+  color: var(--success);
+}
+
+.run-log-item.tool.failed {
+  color: #b91c1c;
+}
+
+.run-log-item.tool.failed::before {
+  content: "✗";
+  color: #dc2626;
+}
+
+.run-log-item[data-progress]::after {
+  content: "  " attr(data-progress);
+  color: var(--amber);
+}
+
+.run-answer {
+  white-space: pre-wrap;
+}
+
+.run-answer:empty {
+  display: none;
+}
+
+/* ==========================================================================
+   Approval Cards
+   ========================================================================== */
+.approval-card {
+  border-left: 3px solid var(--amber);
+}
+
+.approval-badge {
+  color: #b45309;
+  background-color: #fef3c7;
+}
+
+.approval-origin {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 4px 0 8px;
+  word-break: break-all;
+}
+
+.approval-outcome {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.approval-outcome.approved {
+  color: #059669;
+}
+
+.approval-outcome.denied {
+  color: #dc2626;
+}
+
+/* ==========================================================================
+   Run Card (plan checklist, tool log, answer)
+   ========================================================================== */
+.run-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.run-meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.run-badge[data-state="done"] {
+  color: #065f46;
+  background-color: var(--success-light);
+}
+
+.run-plan {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background-color: var(--bg-app);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-main);
+}
+
+.run-plan:empty {
+  display: none;
+}
+
+.run-plan-item {
+  position: relative;
+  padding-left: 18px;
+}
+
+.run-plan-item::before {
+  position: absolute;
+  left: 0;
+  font-weight: 700;
+}
+
+.run-plan-item[data-state="pending"] { color: var(--text-muted); }
+.run-plan-item[data-state="pending"]::before { content: "○"; }
+.run-plan-item[data-state="working"]::before { content: "◐"; color: var(--primary); }
+.run-plan-item[data-state="done"]::before { content: "✓"; color: var(--success); }
+.run-plan-item[data-state="failed"]::before { content: "✗"; color: #dc2626; }
+
+.run-log-item.tool {
+  font-family: inherit;
+  font-size: 11.5px;
+  color: var(--text-main);
+}
+
+.run-log-detail {
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.run-log-item.tool.failed .run-log-detail {
+  color: #b91c1c;
+}
+
+.run-log-item.step.retry,
+.run-log-item.step.not-done {
+  color: #92400e;
+  font-style: italic;
+}
+
+.run-log-item.step.saved {
+  color: var(--success);
+}
+
+.run-log-item[data-progress]::after {
+  display: block;
+  font-size: 10.5px;
+}
+
+.run-answer-box {
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.run-answer-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.run-answer-box .run-answer {
+  font-size: 12.5px;
+  color: var(--text-main);
+}
+
+.run-answer-box.error .run-answer {
+  color: #b91c1c;
+}
+
+.input-textarea:disabled,
+.btn-submit:disabled,
+.action-card:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

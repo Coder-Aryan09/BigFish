@@ -1,5 +1,8 @@
 // BigFish Simplified Entry Controller
+import type { AgentEvent } from "@bigfish/contracts";
 import type { ConnState, ConnStatus } from "../background/conn/connection.js";
+import { startAgentRun, type AgentRun } from "./agent-client.js";
+import type { ApprovalRequest } from "../../safety/approval.js";
 
 const CONN_LABELS: Record<ConnState, string> = {
   signed_out: "Signed out",
@@ -11,6 +14,72 @@ const CONN_LABELS: Record<ConnState, string> = {
   backoff: "Retrying",
   stopped: "Stopped",
 };
+
+const STEP_LABELS: Record<Extract<AgentEvent, { type: "step" }>["node"], string> = {
+  plan: "Planning",
+  act: "Working",
+  verify: "Checking",
+  finalize: "Writing answer",
+};
+
+function el(tag: string, className: string, text?: string): HTMLElement {
+  const node = document.createElement(tag);
+  node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function shortArgs(args: Record<string, unknown>): string {
+  const text = Object.entries(args)
+    .map(([k, v]) => `${k}=${typeof v === "string" ? v : JSON.stringify(v)}`)
+    .join(" ");
+  return text.length > 80 ? `${text.slice(0, 77)}...` : text;
+}
+
+// A short, readable name for a tool call in the run log.
+function toolLabel(name: string, args: Record<string, unknown>): string {
+  const a = args as Record<string, any>;
+  switch (name) {
+    case "browser_navigate":
+      return a.url ? `Open ${String(a.url).replace(/^https?:\/\//, "")}` : `Go ${a.action}`;
+    case "browser_snapshot":
+      return a.mode === "text" ? (a.from_end ? "Read the latest text" : "Read the page") : "Look at the page";
+    case "browser_find":
+      return `Find "${a.query}"`;
+    case "browser_click":
+      return `Click ${a.ref}`;
+    case "browser_type":
+      return `Type "${String(a.text ?? "").slice(0, 40)}" into ${a.ref}${a.submit ? " and submit" : ""}`;
+    case "browser_fill_form":
+      return `Fill ${(a.fields ?? []).length} fields`;
+    case "browser_select":
+      return `Choose "${a.option}" in ${a.ref}`;
+    case "browser_press_key":
+      return `Press ${a.key}`;
+    case "browser_scroll":
+      return `Scroll ${a.direction}`;
+    case "browser_wait_for":
+      return a.idle ? "Wait for the page to finish" : `Wait for ${a.text ? `"${a.text}"` : a.gone_text ? `"${a.gone_text}" to go` : a.url_contains ?? a.ref}`;
+    case "browser_extract":
+      return `Extract ${a.what}`;
+    case "browser_tabs":
+      return a.action === "list" ? "List tabs" : `${a.action} tab ${a.tab}`;
+    default:
+      return `${name.replace(/^browser_/, "")} ${shortArgs(args)}`;
+  }
+}
+
+// One line for a tool result: the delta, or the error code and message.
+function resultSummary(text: string): string {
+  const clean = text.replace(/<\/?page untrusted>/g, "").trim();
+  const line = clean.split("\n").find((l) => l.trim() && !l.startsWith("[tab ")) ?? "";
+  return firstLine(line.replace(/^ok\s*/, ""));
+}
+
+function firstLine(text: string): string {
+  const line = text.split("\n")[0] ?? "";
+  return line.length > 90 ? `${line.slice(0, 87)}...` : line;
+}
 
 interface StatusReply {
   ok: boolean;
@@ -87,7 +156,7 @@ document.addEventListener("DOMContentLoaded", () => {
     card.addEventListener("click", () => {
       const cmd = card.getAttribute("data-cmd");
       if (cmd) {
-        executeCommand(cmd);
+        void executeCommand(cmd);
       }
     });
   });
@@ -129,7 +198,7 @@ document.addEventListener("DOMContentLoaded", () => {
         e.preventDefault();
         const text = inputEl.value.trim();
         if (text) {
-          executeCommand(text);
+          void executeCommand(text);
           inputEl.value = "";
           inputEl.style.height = "auto";
         }
@@ -141,16 +210,20 @@ document.addEventListener("DOMContentLoaded", () => {
     submitBtn.addEventListener("click", () => {
       const text = inputEl.value.trim();
       if (text) {
-        executeCommand(text);
+        void executeCommand(text);
         inputEl.value = "";
         inputEl.style.height = "auto";
       }
     });
   }
 
+  // One agent run at a time. Reset also cancels it.
+  let activeRun: AgentRun | null = null;
+
   // Reset to Home/Welcome View
   if (resetBtn && welcomeView && feedView) {
     resetBtn.addEventListener("click", () => {
+      void activeRun?.cancel();
       feedView.innerHTML = "";
       feedView.style.display = "none";
       welcomeView.style.display = "flex";
@@ -158,113 +231,246 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Execute a prompt/command
-  function executeCommand(prompt: string): void {
-    if (!welcomeView || !feedView) return;
-
-    // Switch view
-    welcomeView.style.display = "none";
-    feedView.style.display = "flex";
-
-    // Append user card
-    const taskContainer = document.createElement("div");
-    taskContainer.className = "task-item";
-
-    const userCard = document.createElement("div");
-    userCard.className = "user-prompt-card";
-    userCard.textContent = prompt;
-    taskContainer.appendChild(userCard);
-
-    // Agent response card (loading)
-    const agentCard = document.createElement("div");
-    agentCard.className = "agent-result-card";
-    agentCard.innerHTML = `
-      <div class="result-header">
-        <span class="result-badge" style="color: #2563eb; background-color: #eff6ff;">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <circle cx="12" cy="12" r="10"></circle>
-            <polyline points="12 6 12 12 16 14"></polyline>
-          </svg>
-          Inspecting page...
-        </span>
-        <span class="result-tool">browser_snapshot</span>
-      </div>
-      <div class="result-body">
-        Scanning active DOM nodes and applying local PII safety vault...
-      </div>
-    `;
-    taskContainer.appendChild(agentCard);
-    feedView.appendChild(taskContainer);
-
-    // Scroll to bottom
-    const canvas = document.querySelector(".main-canvas");
-    if (canvas) canvas.scrollTop = canvas.scrollHeight;
-
-    // Simulate completion
-    setTimeout(() => {
-      const lower = prompt.toLowerCase();
-      let responseHtml = "";
-      let toolName = "browser_snapshot";
-
-      if (lower.includes("summarize")) {
-        toolName = "browser_snapshot";
-        responseHtml = `
-          <div class="result-body">
-            <strong>Page Summary:</strong>
-            <p style="margin-top: 4px;">Found main content with 1 billing form, 3 pricing tiers, and FAQ items. All credentials remain encrypted in local session memory.</p>
-          </div>
-        `;
-      } else if (lower.includes("form") || lower.includes("fill")) {
-        toolName = "browser_fill_form";
-        responseHtml = `
-          <div class="result-body">
-            <strong>Form Identified:</strong>
-            <p style="margin-top: 4px;">Detected 3 input fields (Company Name, Tax ID, Address). Values sanitized via PII vault without exposing sensitive details.</p>
-            <div class="simple-approval-box">
-              <div class="approval-title-text">Confirm autofill on current tab?</div>
-              <div class="approval-btn-group">
-                <button class="btn-confirm-sm" onclick="this.parentElement.innerHTML='<span style=\\'color:#059669;font-weight:600;font-size:11px;\\'>✓ Form populated successfully</span>'">Approve</button>
-                <button class="btn-cancel-sm" onclick="this.parentElement.innerHTML='<span style=\\'color:#dc2626;font-size:11px;\\'>Cancelled</span>'">Cancel</button>
-              </div>
-            </div>
-          </div>
-        `;
-      } else if (lower.includes("extract") || lower.includes("table")) {
-        toolName = "browser_find";
-        responseHtml = `
-          <div class="result-body">
-            <strong>Table Data Extracted:</strong>
-            <p style="margin-top: 4px;">Extracted 3 columns and 4 rows. Cleaned of tracking tags and ready for agent reasoning.</p>
-          </div>
-        `;
-      } else {
-        toolName = "browser_find";
-        responseHtml = `
-          <div class="result-body">
-            <strong>Action ready:</strong>
-            <p style="margin-top: 4px;">Found relevant DOM elements for "<em>${escapeHtml(prompt.slice(0, 40))}</em>". Zero PII was exposed to external models.</p>
-          </div>
-        `;
-      }
-
-      agentCard.innerHTML = `
-        <div class="result-header">
-          <span class="result-badge">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <polyline points="20 6 9 17 4 12"></polyline>
-            </svg>
-            Complete (32ms)
-          </span>
-          <span class="result-tool">${toolName}</span>
-        </div>
-        ${responseHtml}
-      `;
-
-      if (canvas) canvas.scrollTop = canvas.scrollHeight;
-    }, 700);
+  // While a run is going, the input and quick actions are locked; Cancel lives on the run card.
+  function setBusy(busy: boolean): void {
+    if (inputEl) {
+      inputEl.disabled = busy;
+      inputEl.placeholder = busy ? "BigFish is working… cancel the run to send another task" : "Ask BigFish what to do on this page... (e.g. click button, summarize, extract)";
+    }
+    if (submitBtn) submitBtn.disabled = busy;
+    actionCards.forEach((card) => (card.disabled = busy));
   }
 
-  // Listen for connection updates and real approval requests from the background service worker
+  // Run a prompt with the agent on the server and show its steps live.
+  async function executeCommand(prompt: string): Promise<void> {
+    if (!welcomeView || !feedView || activeRun) return;
+
+    welcomeView.style.display = "none";
+    feedView.style.display = "flex";
+    setBusy(true);
+
+    const card = renderRunCard(prompt);
+    feedView.appendChild(card.root);
+    scrollFeed();
+
+    try {
+      activeRun = await startAgentRun(prompt, (event) => {
+        card.onEvent(event);
+        scrollFeed();
+      });
+      card.setCancel(() => void activeRun?.cancel());
+      await activeRun.done;
+      card.finish();
+    } catch (err) {
+      card.fail(err instanceof Error ? err.message : String(err));
+    } finally {
+      activeRun = null;
+      setBusy(false);
+      inputEl?.focus();
+      scrollFeed();
+    }
+  }
+
+  function scrollFeed(): void {
+    const canvas = document.querySelector(".main-canvas");
+    if (canvas) canvas.scrollTop = canvas.scrollHeight;
+  }
+
+  // A task card: the prompt, the plan as a checklist, a live log of tool calls,
+  // and the final answer. Server and page text is always set with textContent.
+  function renderRunCard(prompt: string) {
+    const root = el("div", "task-item");
+    root.appendChild(el("div", "user-prompt-card", prompt));
+
+    const agentCard = el("div", "agent-result-card");
+    const header = el("div", "result-header");
+    const badge = el("span", "result-badge run-badge", "Starting");
+    badge.dataset.state = "running";
+    const meta = el("span", "run-meta", "");
+    const cancelBtn = el("button", "btn-cancel-sm", "Cancel") as HTMLButtonElement;
+    cancelBtn.hidden = true;
+    const right = el("div", "run-header-right");
+    right.append(meta, cancelBtn);
+    header.append(badge, right);
+    const plan = el("ol", "run-plan");
+    const log = el("ol", "run-log");
+    const answerBox = el("div", "run-answer-box");
+    answerBox.hidden = true;
+    const answer = el("div", "result-body run-answer");
+    answerBox.append(el("div", "run-answer-label", "Answer"), answer);
+    agentCard.append(header, plan, log, answerBox);
+    root.appendChild(agentCard);
+
+    const planItems = new Map<number, HTMLElement>();
+    const toolLines = new Map<string, HTMLElement>();
+    const started = Date.now();
+    let tools = 0;
+    let ended = false;
+    const tick = setInterval(() => updateMeta(), 1000);
+
+    function updateMeta(): void {
+      const secs = Math.round((Date.now() - started) / 1000);
+      meta.textContent = `${secs}s · ${tools} tool${tools === 1 ? "" : "s"}`;
+    }
+    const addLine = (text: string, kind: string) => {
+      const line = el("li", `run-log-item ${kind}`, text);
+      log.appendChild(line);
+      return line;
+    };
+    const setBadge = (text: string, state: "running" | "done" | "error") => {
+      badge.textContent = text;
+      badge.dataset.state = state;
+    };
+    const markSubtask = (id: number | undefined, state: "working" | "done" | "failed") => {
+      if (id === undefined) return;
+      const item = planItems.get(id);
+      if (item) item.dataset.state = state;
+    };
+    const end = () => {
+      ended = true;
+      cancelBtn.hidden = true;
+      clearInterval(tick);
+      updateMeta();
+      for (const line of toolLines.values()) if (line.classList.contains("pending")) line.className = "run-log-item tool failed";
+    };
+    const showAnswer = (text: string, isError: boolean) => {
+      answerBox.hidden = false;
+      answerBox.classList.toggle("error", isError);
+      answer.textContent = text;
+    };
+    updateMeta();
+
+    return {
+      root,
+      setCancel(cancel: () => void) {
+        if (ended) return;
+        cancelBtn.hidden = false;
+        cancelBtn.onclick = () => {
+          cancelBtn.disabled = true;
+          cancelBtn.textContent = "Cancelling";
+          cancel();
+        };
+      },
+      onEvent(event: AgentEvent) {
+        switch (event.type) {
+          case "run":
+            setBadge("Planning", "running");
+            break;
+          case "plan":
+            for (const s of event.subtasks) {
+              const item = el("li", "run-plan-item", s.goal);
+              item.dataset.state = "pending";
+              plan.appendChild(item);
+              planItems.set(s.id, item);
+            }
+            break;
+          case "step":
+            setBadge(STEP_LABELS[event.node], "running");
+            if (event.node === "act") {
+              markSubtask(event.subtask, "working");
+              if (event.message.startsWith("Retrying")) addLine(event.message, "step retry");
+              else if (event.message.startsWith("Saved ")) addLine(event.message, "step saved");
+            } else if (event.node === "verify") {
+              const passed = event.message.startsWith("Passed");
+              markSubtask(event.subtask, passed ? "done" : "failed");
+              if (!passed) addLine(event.message, "step not-done");
+            }
+            break;
+          case "tool_call":
+            tools++;
+            updateMeta();
+            toolLines.set(event.toolCallId, addLine(toolLabel(event.name, event.args), "tool pending"));
+            break;
+          case "progress": {
+            const line = toolLines.get(event.toolCallId);
+            if (line && event.message) line.dataset.progress = event.message;
+            break;
+          }
+          case "tool_result": {
+            const line = toolLines.get(event.toolCallId);
+            if (!line) break;
+            delete line.dataset.progress;
+            line.className = `run-log-item tool ${event.ok ? "ok" : "failed"}`;
+            line.appendChild(el("span", "run-log-detail", resultSummary(event.text)));
+            break;
+          }
+          case "final":
+            setBadge("Done", "done");
+            showAnswer(event.answer, false);
+            end();
+            break;
+          case "error":
+            setBadge(event.code === "CANCELLED" ? "Cancelled" : `Stopped: ${event.code}`, "error");
+            showAnswer(event.message, true);
+            end();
+            break;
+        }
+      },
+      // Stream ended. If no final or error came, the connection dropped.
+      finish() {
+        if (ended) return;
+        setBadge("Stopped", "error");
+        showAnswer("The connection to the server closed before the run finished.", true);
+        end();
+      },
+      fail(message: string) {
+        setBadge("Could not start", "error");
+        showAnswer(message, true);
+        end();
+      },
+    };
+  }
+
+  // Approval cards, by request id, so they can close when the request ends elsewhere.
+  const approvalCards = new Map<string, HTMLElement>();
+  // Opened as a popup for one approval (no side panel was open).
+  const popupApprovalId = new URLSearchParams(location.search).get("approvalId");
+
+  function showApproval(req: ApprovalRequest): void {
+    if (!feedView || approvalCards.has(req.id)) return;
+    feedView.style.display = "flex";
+    if (welcomeView) welcomeView.style.display = "none";
+
+    const card = el("div", "agent-result-card approval-card");
+    const head = el("div", "result-header");
+    head.append(el("span", "result-badge approval-badge", "Approval needed"), el("span", "result-tool", req.tool));
+    const body = el("div", "result-body");
+    body.append(el("strong", "", req.reason), el("p", "approval-origin", `On: ${req.origin || "current tab"}`));
+    const buttons = el("div", "approval-btn-group");
+    const approve = el("button", "btn-confirm-sm", "Approve") as HTMLButtonElement;
+    const deny = el("button", "btn-cancel-sm", "Deny") as HTMLButtonElement;
+    buttons.append(approve, deny);
+    body.appendChild(buttons);
+    card.append(head, body);
+    feedView.appendChild(card);
+    approvalCards.set(req.id, card);
+    scrollFeed();
+
+    const decide = (approved: boolean) => {
+      approve.disabled = deny.disabled = true;
+      void browser.runtime.sendMessage({ type: "RESOLVE_APPROVAL", id: req.id, approved });
+      settleApproval(req.id, approved ? "Approved" : "Denied");
+      if (popupApprovalId) setTimeout(() => window.close(), 400);
+    };
+    approve.addEventListener("click", () => decide(true));
+    deny.addEventListener("click", () => decide(false));
+  }
+
+  function settleApproval(id: string, outcome: string): void {
+    const card = approvalCards.get(id);
+    if (!card) return;
+    approvalCards.delete(id);
+    card.querySelector(".approval-btn-group")?.replaceWith(el("span", `approval-outcome ${outcome.toLowerCase()}`, outcome));
+  }
+
+  if (popupApprovalId) {
+    void browser.runtime.sendMessage({ type: "BIGFISH_GET_APPROVAL", id: popupApprovalId }).then((reply: any) => {
+      if (reply?.request) showApproval(reply.request);
+      else window.close();
+    });
+  }
+
+  // Connection updates and approval requests from the background service worker
   browser.runtime.onMessage.addListener((msg: any) => {
     if (msg?.type === "BIGFISH_CONN_STATUS") {
       renderStatus(msg.status);
@@ -273,49 +479,12 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     if (msg?.type === "BIGFISH_APPROVAL_REQUEST") {
-      const req = msg.payload;
-      if (!feedView) return;
-      feedView.style.display = "flex";
-      if (welcomeView) welcomeView.style.display = "none";
-
-      const canvas = document.querySelector("#feed-canvas");
-      const approvalEl = document.createElement("div");
-      approvalEl.className = "agent-bubble";
-      approvalEl.style.borderLeft = "3px solid #f59e0b";
-      approvalEl.innerHTML = `
-        <div class="result-header">
-          <span class="result-badge" style="background:#fef3c7;color:#b45309;">⚠️ Approval Required</span>
-          <span class="result-tool">${escapeHtml(req.tool)}</span>
-        </div>
-        <div class="result-body">
-          <strong>${escapeHtml(req.reason)}</strong>
-          <p style="font-size:11px;color:#6b7280;margin:4px 0;">Target: ${escapeHtml(req.origin || "Current tab")}</p>
-          <div class="simple-approval-box" style="margin-top:8px;">
-            <div class="approval-btn-group">
-              <button class="btn-confirm-sm" id="btn-approve-${req.id}">Approve Action</button>
-              <button class="btn-cancel-sm" id="btn-deny-${req.id}">Deny</button>
-            </div>
-          </div>
-        </div>
-      `;
-      canvas?.appendChild(approvalEl);
-      if (canvas) canvas.scrollTop = canvas.scrollHeight;
-
-      document.getElementById(`btn-approve-${req.id}`)?.addEventListener("click", () => {
-        browser.runtime.sendMessage({ type: "RESOLVE_APPROVAL", id: req.id, approved: true });
-        approvalEl.innerHTML = `<span style="color:#059669;font-weight:600;font-size:12px;">✓ Approved by user</span>`;
-      });
-
-      document.getElementById(`btn-deny-${req.id}`)?.addEventListener("click", () => {
-        browser.runtime.sendMessage({ type: "RESOLVE_APPROVAL", id: req.id, approved: false });
-        approvalEl.innerHTML = `<span style="color:#dc2626;font-size:12px;">✗ Denied by user</span>`;
-      });
+      // A popup only shows its own request.
+      if (!popupApprovalId || msg.payload?.id === popupApprovalId) showApproval(msg.payload);
+      return;
+    }
+    if (msg?.type === "BIGFISH_APPROVAL_CLOSED") {
+      settleApproval(msg.id, "Closed");
     }
   });
-
-  function escapeHtml(str: string): string {
-    const div = document.createElement("div");
-    div.textContent = str;
-    return div.innerHTML;
-  }
 });

@@ -1,5 +1,10 @@
-// BigFish Content DOM Engine: Element ref stamping, fingerprints, actionability verification,
-// and DOM manipulation (click, type, key, select, extract).
+// BigFish Content DOM Engine: element refs, fingerprints, actionability, and the
+// DOM side of every browser tool (scan, text, find, click, type, select, keys,
+// scroll, wait checks, extract).
+//
+// Refs are "<tab slot>:<id>". Ids keep counting across page loads of a tab (the
+// service worker passes idBase), so a ref from an old page never points at a
+// new element: it comes back as STALE_REF instead.
 
 export interface ElementFingerprint {
   role: string;
@@ -13,67 +18,71 @@ export interface ScannedElement {
   ref: string;
   role: string;
   name: string;
-  tag: string;
   value?: string;
+  checked?: boolean;
   href?: string;
-  fp: ElementFingerprint;
+  inViewport: boolean;
 }
 
+export interface RefContext {
+  slot: number;
+  idBase: number;
+}
+
+export type ActionResult =
+  | { ok: true; [key: string]: unknown }
+  | { ok: false; error: string; reason?: string; candidates?: string[]; coveringRef?: string; options?: string[] };
+
+const INTERACTIVE_SELECTOR = [
+  "button",
+  "a[href]",
+  "input:not([type='hidden'])",
+  "textarea",
+  "select",
+  "summary",
+  "[contenteditable='true']",
+  "[contenteditable='']",
+  ...["button", "link", "tab", "menuitem", "checkbox", "radio", "switch", "option", "combobox", "textbox", "searchbox", "listbox"].map(
+    (role) => `[role='${role}']`,
+  ),
+].join(", ");
+
+// Scans stop here, so a huge page cannot stall the content script.
+const MAX_SCAN = 800;
+const NAME_CHARS = 80;
+const TEXT_ROLES = new Set(["textbox", "searchbox", "combobox"]);
+
 export class BigFishDOMEngine {
-  private elementMap: Map<string, HTMLElement> = new Map();
-  private fingerprintMap: Map<string, ElementFingerprint> = new Map();
-  private tabSlot: number = 1;
-  private idCounter: number = 1;
+  private readonly elementMap = new Map<string, HTMLElement>();
+  private readonly fingerprintMap = new Map<string, ElementFingerprint>();
+  private slot = 1;
+  private nextId = 1;
 
-  setTabSlot(slot: number) {
-    this.tabSlot = slot;
+  // Every call from the service worker carries the tab slot and the next free id.
+  useContext(ctx?: RefContext): void {
+    if (!ctx) return;
+    this.slot = ctx.slot;
+    if (ctx.idBase > this.nextId) this.nextId = ctx.idBase;
   }
 
-  resetRefs() {
-    this.elementMap.clear();
-    this.fingerprintMap.clear();
-    this.idCounter = 1;
+  get nextFreeId(): number {
+    return this.nextId;
   }
 
-  private computeCssSelector(el: HTMLElement): string {
-    if (el.id) return `#${CSS.escape(el.id)}`;
-    let path = el.tagName.toLowerCase();
-    if (el.className && typeof el.className === "string") {
-      const classes = el.className.trim().split(/\s+/).slice(0, 2).map((c) => `.${CSS.escape(c)}`).join("");
-      path += classes;
-    }
-    return path;
-  }
+  // ---- naming -----------------------------------------------------------------
 
-  private getAccessibleName(el: HTMLElement): string {
-    const ariaLabel = el.getAttribute("aria-label");
-    if (ariaLabel) return ariaLabel.trim();
-    const labelledby = el.getAttribute("aria-labelledby");
-    if (labelledby) {
-      const lbl = document.getElementById(labelledby);
-      if (lbl && lbl.textContent) return lbl.textContent.trim();
-    }
-    const placeholder = el.getAttribute("placeholder");
-    if (placeholder) return placeholder.trim();
-    const title = el.getAttribute("title");
-    if (title) return title.trim();
-    if (el instanceof HTMLInputElement || el instanceof HTMLButtonElement) {
-      if (el.value) return el.value.trim();
-    }
-    return (el.textContent || "").trim().slice(0, 60);
-  }
-
-  private getRole(el: HTMLElement): string {
+  getRole(el: HTMLElement): string {
     const roleAttr = el.getAttribute("role");
-    if (roleAttr) return roleAttr.toLowerCase();
+    if (roleAttr) return roleAttr.toLowerCase().split(/\s+/)[0]!;
     const tag = el.tagName.toLowerCase();
-    if (tag === "button") return "button";
+    if (tag === "button" || tag === "summary") return "button";
     if (tag === "a") return "link";
     if (tag === "input") {
-      const type = (el as HTMLInputElement).type || "text";
-      if (type === "button" || type === "submit") return "button";
+      const type = ((el as HTMLInputElement).type || "text").toLowerCase();
+      if (["button", "submit", "reset", "image"].includes(type)) return "button";
       if (type === "checkbox") return "checkbox";
       if (type === "radio") return "radio";
+      if (type === "search") return "searchbox";
       return "textbox";
     }
     if (tag === "textarea") return "textbox";
@@ -82,185 +91,504 @@ export class BigFishDOMEngine {
     return tag;
   }
 
-  scanPage(withinEl?: HTMLElement): ScannedElement[] {
-    const root = withinEl || document.body;
+  getAccessibleName(el: HTMLElement): string {
+    const clean = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim().slice(0, NAME_CHARS);
+    const aria = el.getAttribute("aria-label");
+    if (aria?.trim()) return clean(aria);
+    const labelledby = el.getAttribute("aria-labelledby");
+    if (labelledby) {
+      const text = labelledby
+        .split(/\s+/)
+        .map((id) => document.getElementById(id)?.textContent ?? "")
+        .join(" ");
+      if (text.trim()) return clean(text);
+    }
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
+      const label = el.labels?.[0];
+      if (label) {
+        // A label that wraps its control would also read the control's own text (e.g. select options).
+        const copy = label.cloneNode(true) as HTMLElement;
+        copy.querySelectorAll("input, select, textarea, button").forEach((c) => c.remove());
+        if (copy.textContent?.trim()) return clean(copy.textContent);
+      }
+    }
+    const placeholder = el.getAttribute("placeholder") ?? el.getAttribute("aria-placeholder") ?? el.getAttribute("data-placeholder");
+    if (placeholder?.trim()) return clean(placeholder);
+    const title = el.getAttribute("title");
+    if (title?.trim()) return clean(title);
+    if (el instanceof HTMLInputElement && ["button", "submit", "reset"].includes(el.type) && el.value) return clean(el.value);
+    const alt = el.querySelector("img[alt]")?.getAttribute("alt");
+    const text = clean(el.innerText || el.textContent);
+    return text || clean(alt);
+  }
+
+  private valueOf(el: HTMLElement, role: string): string | undefined {
+    if (el instanceof HTMLSelectElement) return el.selectedOptions[0]?.textContent?.trim() ?? "";
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+      return TEXT_ROLES.has(role) ? el.value : undefined;
+    }
+    if (el.isContentEditable) return (el.innerText || "").trim().slice(0, 200);
+    return undefined;
+  }
+
+  private computeCssSelector(el: HTMLElement): string {
+    if (el.id) return `#${CSS.escape(el.id)}`;
+    const name = el.getAttribute("name");
+    if (name) return `${el.tagName.toLowerCase()}[name="${CSS.escape(name)}"]`;
+    let path = el.tagName.toLowerCase();
+    if (typeof el.className === "string" && el.className.trim()) {
+      path += el.className
+        .trim()
+        .split(/\s+/)
+        .slice(0, 2)
+        .map((c) => `.${CSS.escape(c)}`)
+        .join("");
+    }
+    return path;
+  }
+
+  // ---- scanning -------------------------------------------------------------------
+
+  private isVisible(el: HTMLElement): boolean {
+    const rect = el.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    const style = window.getComputedStyle(el);
+    return style.display !== "none" && style.visibility !== "hidden" && parseFloat(style.opacity || "1") > 0.05;
+  }
+
+  private inViewport(el: HTMLElement): boolean {
+    const r = el.getBoundingClientRect();
+    return r.bottom > 0 && r.right > 0 && r.top < window.innerHeight && r.left < window.innerWidth;
+  }
+
+  private refFor(el: HTMLElement): string {
+    const existing = el.getAttribute("data-bigfish-id");
+    if (existing && this.elementMap.get(existing) === el) return existing;
+    const ref = `${this.slot}:${this.nextId++}`;
+    el.setAttribute("data-bigfish-id", ref);
+    return ref;
+  }
+
+  scan(within?: HTMLElement | null, opts: { viewportOnly?: boolean } = {}): ScannedElement[] {
+    const root = within ?? document.body;
     if (!root) return [];
-
     const results: ScannedElement[] = [];
-    const selector = "button, a[href], input, textarea, select, [role='button'], [role='link'], [role='tab'], [role='menuitem'], [contenteditable='true']";
-    const candidates = Array.from(root.querySelectorAll<HTMLElement>(selector));
+    for (const el of Array.from(root.querySelectorAll<HTMLElement>(INTERACTIVE_SELECTOR))) {
+      if (results.length >= MAX_SCAN) break;
+      if (!this.isVisible(el)) continue;
+      const inViewport = this.inViewport(el);
+      if (opts.viewportOnly && !inViewport) continue;
 
-    for (const el of candidates) {
-      const rect = el.getBoundingClientRect();
-      const style = window.getComputedStyle(el);
-      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0" || rect.width <= 0 || rect.height <= 0) {
-        continue;
-      }
-
-      let existingRef = el.getAttribute("data-bigfish-id");
-      if (!existingRef || !this.elementMap.has(existingRef)) {
-        const id = this.idCounter++;
-        existingRef = `${this.tabSlot}:${id}`;
-        el.setAttribute("data-bigfish-id", existingRef);
-      }
-
-      this.elementMap.set(existingRef, el);
-
+      const ref = this.refFor(el);
       const role = this.getRole(el);
       const name = this.getAccessibleName(el);
-      const tag = el.tagName.toLowerCase();
-      const css = this.computeCssSelector(el);
-      const href = (el as HTMLAnchorElement).href || el.getAttribute("href") || undefined;
-      const val = (el as HTMLInputElement).value;
+      const href = el instanceof HTMLAnchorElement ? el.getAttribute("href") ?? undefined : undefined;
+      this.elementMap.set(ref, el);
+      this.fingerprintMap.set(ref, { role, name, tag: el.tagName.toLowerCase(), css: this.computeCssSelector(el), href });
 
-      const fp: ElementFingerprint = { role, name, tag, css, href };
-      this.fingerprintMap.set(existingRef, fp);
-
-      results.push({
-        ref: existingRef,
-        role,
-        name,
-        tag,
-        value: val !== undefined ? val : undefined,
-        href,
-        fp,
-      });
+      const entry: ScannedElement = { ref, role, name, href, inViewport };
+      const value = this.valueOf(el, role);
+      if (value !== undefined) entry.value = value;
+      if (el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")) entry.checked = el.checked;
+      else if (el.getAttribute("aria-checked")) entry.checked = el.getAttribute("aria-checked") === "true";
+      results.push(entry);
     }
-
     return results;
   }
 
-  resolveElement(ref: string, cachedFp?: ElementFingerprint): HTMLElement | null {
-    const el = this.elementMap.get(ref);
-    if (el && document.contains(el)) {
-      return el;
-    }
-
-    const domEl = document.querySelector<HTMLElement>(`[data-bigfish-id="${ref}"]`);
-    if (domEl && document.contains(domEl)) {
-      this.elementMap.set(ref, domEl);
-      return domEl;
-    }
-
-    const fp = cachedFp || this.fingerprintMap.get(ref);
-    if (fp) {
-      return this.resolveByFingerprint(fp, ref);
-    }
-
-    return null;
+  // Name of an open modal dialog, if any.
+  openDialog(): string | undefined {
+    const dialogs = Array.from(document.querySelectorAll<HTMLElement>("dialog[open], [role='dialog'], [role='alertdialog'], [aria-modal='true']"));
+    const visible = dialogs.find((d) => this.isVisible(d));
+    if (!visible) return undefined;
+    return this.getAccessibleName(visible).slice(0, 40) || "dialog";
   }
 
-  resolveByFingerprint(fp: ElementFingerprint, targetRef?: string): HTMLElement | null {
-    if (typeof document === "undefined") return null;
-    if (fp.css) {
-      try {
-        const el = document.querySelector<HTMLElement>(fp.css);
-        if (el && document.contains(el)) {
-          if (targetRef) {
-            el.setAttribute("data-bigfish-id", targetRef);
-            this.elementMap.set(targetRef, el);
-          }
-          return el;
-        }
-      } catch {}
-    }
-
-    const candidates = Array.from(document.querySelectorAll<HTMLElement>(fp.tag || "*"));
-    for (const el of candidates) {
-      const name = this.getAccessibleName(el);
-      const role = this.getRole(el);
-      if (role === fp.role && name === fp.name) {
-        if (targetRef) {
-          el.setAttribute("data-bigfish-id", targetRef);
-          this.elementMap.set(targetRef, el);
-        }
-        return el;
-      }
-    }
-
-    return null;
+  pageText(within?: HTMLElement | null): string {
+    const root = within ?? document.body;
+    const text = (root?.innerText ?? "").replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
+    return text;
   }
 
-  async waitActionable(el: HTMLElement, timeoutMs: number = 3000): Promise<{ ok: boolean; reason?: string; coveringRef?: string }> {
-    const startTime = Date.now();
+  // ---- ref resolution ------------------------------------------------------------
 
-    while (Date.now() - startTime < timeoutMs) {
-      el.scrollIntoView({ block: "nearest", inline: "nearest" });
-      const rect1 = el.getBoundingClientRect();
-      const style = window.getComputedStyle(el);
+  resolve(ref: string): HTMLElement | null {
+    const [slot] = ref.split(":");
+    if (Number(slot) !== this.slot) return null;
+    const known = this.elementMap.get(ref);
+    if (known?.isConnected) return known;
 
-      if (style.display === "none" || style.visibility === "hidden" || parseFloat(style.opacity) < 0.1) {
-        await new Promise((r) => setTimeout(r, 60));
-        continue;
-      }
-
-      if ((el as HTMLButtonElement).disabled) {
-        return { ok: false, reason: "Element is disabled" };
-      }
-
-      await new Promise((r) => setTimeout(r, 50));
-      const rect2 = el.getBoundingClientRect();
-
-      const isStable = Math.abs(rect1.left - rect2.left) < 1 && Math.abs(rect1.top - rect2.top) < 1;
-      if (!isStable) {
-        continue;
-      }
-
-      const centerX = rect2.left + rect2.width / 2;
-      const centerY = rect2.top + rect2.height / 2;
-      const topEl = document.elementFromPoint(centerX, centerY);
-
-      if (topEl && (topEl === el || el.contains(topEl) || topEl.contains(el))) {
-        return { ok: true };
-      }
-
-      const coveringRef = topEl?.getAttribute("data-bigfish-id") || undefined;
-      return { ok: false, reason: "Element is covered by another element", coveringRef };
+    const tagged = document.querySelector<HTMLElement>(`[data-bigfish-id="${CSS.escape(ref)}"]`);
+    if (tagged) {
+      this.elementMap.set(ref, tagged);
+      return tagged;
     }
 
-    return { ok: false, reason: "Timeout waiting for element actionability" };
+    // Same page, re-rendered: find the element again by role + name (must be unique).
+    const fp = this.fingerprintMap.get(ref);
+    if (!fp) return null;
+    const matches = Array.from(document.querySelectorAll<HTMLElement>(fp.tag)).filter(
+      (el) => this.isVisible(el) && this.getRole(el) === fp.role && this.getAccessibleName(el) === fp.name,
+    );
+    if (matches.length !== 1) return null;
+    const el = matches[0]!;
+    el.setAttribute("data-bigfish-id", ref);
+    this.elementMap.set(ref, el);
+    return el;
   }
 
-  describeElement(el: HTMLElement) {
+  // For STALE_REF: up to 3 current elements that look like the lost one.
+  candidatesFor(ref: string): string[] {
+    const fp = this.fingerprintMap.get(ref);
+    const elements = this.scan();
+    const words = (fp?.name ?? "").toLowerCase().split(/\W+/).filter(Boolean);
+    return elements
+      .map((e) => {
+        let score = fp && e.role === fp.role ? 1 : 0;
+        for (const w of words) if (e.name.toLowerCase().includes(w)) score += 2;
+        return { e, score };
+      })
+      .filter((x) => x.score > 1)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3)
+      .map(({ e }) => `${e.ref} ${e.role} "${e.name}"`);
+  }
+
+  private stale(ref: string): ActionResult {
+    return { ok: false, error: "STALE_REF", candidates: this.candidatesFor(ref) };
+  }
+
+  // With no ref: the focused element (for Enter without a target).
+  describe(ref?: string) {
+    const el = ref ? this.resolve(ref) : (document.activeElement as HTMLElement | null);
+    if (!el) return null;
     const role = this.getRole(el);
     const label = this.getAccessibleName(el);
     const form = el.closest("form");
-    let formSubmitLabel: string | undefined = undefined;
+    let formSubmitLabel: string | undefined;
     if (form) {
-      const submitBtn = form.querySelector<HTMLElement>("button[type='submit'], input[type='submit'], button:not([type])");
-      if (submitBtn) {
-        formSubmitLabel = this.getAccessibleName(submitBtn);
+      const submit = form.querySelector<HTMLElement>("button[type='submit'], input[type='submit'], button:not([type])");
+      if (submit) formSubmitLabel = this.getAccessibleName(submit);
+    }
+    const isSearch =
+      el.getAttribute("type") === "search" ||
+      role === "searchbox" ||
+      form?.getAttribute("role") === "search" ||
+      /\bsearch\b/i.test(label) ||
+      /\bsearch\b/i.test(form?.getAttribute("action") ?? "");
+    return { role, label, formSubmitLabel, isSearch, origin: window.location.origin };
+  }
+
+  // ---- actionability -------------------------------------------------------------
+
+  async waitActionable(el: HTMLElement, timeoutMs = 3000): Promise<{ ok: boolean; reason?: string; coveringRef?: string }> {
+    const start = Date.now();
+    let lastReason = "not visible";
+    while (Date.now() - start < timeoutMs) {
+      el.scrollIntoView({ block: "center", inline: "nearest" });
+      if (!this.isVisible(el)) {
+        lastReason = "not visible";
+        await sleep(80);
+        continue;
+      }
+      if ((el as HTMLButtonElement).disabled || el.getAttribute("aria-disabled") === "true") {
+        lastReason = "disabled";
+        await sleep(80);
+        continue;
+      }
+      const r1 = el.getBoundingClientRect();
+      await sleep(50);
+      const r2 = el.getBoundingClientRect();
+      if (Math.abs(r1.left - r2.left) >= 1 || Math.abs(r1.top - r2.top) >= 1) {
+        lastReason = "still moving";
+        continue;
+      }
+      const top = document.elementFromPoint(r2.left + r2.width / 2, r2.top + r2.height / 2) as HTMLElement | null;
+      if (!top || top === el || el.contains(top) || top.contains(el) || top.closest("label")?.contains(el)) return { ok: true };
+      const cover = top.closest<HTMLElement>("[data-bigfish-id]");
+      lastReason = `covered by ${top.tagName.toLowerCase()}${cover ? "" : ` "${this.getAccessibleName(top).slice(0, 30)}"`}`;
+      return { ok: false, reason: lastReason, coveringRef: cover?.getAttribute("data-bigfish-id") ?? undefined };
+    }
+    return { ok: false, reason: lastReason };
+  }
+
+  // ---- actions ---------------------------------------------------------------------
+
+  async click(ref: string): Promise<ActionResult> {
+    const el = this.resolve(ref);
+    if (!el) return this.stale(ref);
+    const ready = await this.waitActionable(el);
+    if (!ready.ok) return { ok: false, error: "NOT_ACTIONABLE", reason: ready.reason, coveringRef: ready.coveringRef };
+    const opts = { bubbles: true, cancelable: true, view: window };
+    el.dispatchEvent(new PointerEvent("pointerdown", opts));
+    el.dispatchEvent(new MouseEvent("mousedown", opts));
+    el.focus({ preventScroll: true });
+    el.dispatchEvent(new PointerEvent("pointerup", opts));
+    el.dispatchEvent(new MouseEvent("mouseup", opts));
+    el.click();
+    return { ok: true, role: this.getRole(el), name: this.getAccessibleName(el) };
+  }
+
+  async type(ref: string, text: string, opts: { clear?: boolean; submit?: boolean }): Promise<ActionResult> {
+    const el = this.resolve(ref);
+    if (!el) return this.stale(ref);
+    const ready = await this.waitActionable(el);
+    if (!ready.ok) return { ok: false, error: "NOT_ACTIONABLE", reason: ready.reason, coveringRef: ready.coveringRef };
+    const isField = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+    const editable = isField ? el : el.isContentEditable ? el : (el.querySelector<HTMLElement>("[contenteditable='true'], textarea, input") ?? null);
+    if (!editable) return { ok: false, error: "NOT_EDITABLE", reason: `${this.getRole(el)} is not a text field` };
+
+    editable.focus();
+    if (editable instanceof HTMLInputElement || editable instanceof HTMLTextAreaElement) {
+      // The native setter, so React and other frameworks see the change.
+      const proto = editable instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+      const setValue = Object.getOwnPropertyDescriptor(proto, "value")!.set!;
+      setValue.call(editable, opts.clear === false ? editable.value + text : text);
+      editable.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
+      editable.dispatchEvent(new Event("change", { bubbles: true }));
+    } else {
+      // Rich editors (ProseMirror, Gmail) listen to beforeinput/input, which insertText produces.
+      if (opts.clear !== false) {
+        const range = document.createRange();
+        range.selectNodeContents(editable);
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+      }
+      const inserted = document.execCommand("insertText", false, text);
+      if (!inserted) {
+        editable.textContent = opts.clear === false ? (editable.textContent ?? "") + text : text;
+        editable.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
       }
     }
-    const isSearch = el.getAttribute("type") === "search" || role === "searchbox" || /\bsearch\b/i.test(label);
-    return {
-      role,
-      label,
-      formSubmitLabel,
-      isSearch,
-      origin: window.location.origin,
+
+    if (opts.submit) this.pressEnter(editable);
+    return { ok: true, role: this.getRole(el), name: this.getAccessibleName(el), value: this.valueOf(editable, "textbox") ?? "" };
+  }
+
+  async select(ref: string, option: string): Promise<ActionResult> {
+    const el = this.resolve(ref);
+    if (!el) return this.stale(ref);
+    const want = option.trim().toLowerCase();
+
+    if (el instanceof HTMLSelectElement) {
+      const options = Array.from(el.options);
+      const match =
+        options.find((o) => o.textContent?.trim().toLowerCase() === want || o.value.toLowerCase() === want) ??
+        options.find((o) => o.textContent?.trim().toLowerCase().includes(want));
+      if (!match) {
+        return { ok: false, error: "OPTION_NOT_FOUND", options: options.slice(0, 10).map((o) => o.textContent?.trim() ?? o.value) };
+      }
+      const setValue = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!;
+      setValue.call(el, match.value);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return { ok: true, role: "combobox", name: this.getAccessibleName(el), selected: match.textContent?.trim() ?? match.value };
+    }
+
+    // ARIA combobox or listbox: open it, then click the option.
+    const opened = await this.click(ref);
+    if (!opened.ok) return opened;
+    await sleep(250);
+    const listId = el.getAttribute("aria-controls") ?? el.getAttribute("aria-owns");
+    const scope = (listId && document.getElementById(listId)) || document;
+    const options = Array.from(scope.querySelectorAll<HTMLElement>("[role='option']")).filter((o) => this.isVisible(o));
+    const match =
+      options.find((o) => this.getAccessibleName(o).toLowerCase() === want) ??
+      options.find((o) => this.getAccessibleName(o).toLowerCase().includes(want));
+    if (!match) {
+      return { ok: false, error: "OPTION_NOT_FOUND", options: options.slice(0, 10).map((o) => this.getAccessibleName(o)) };
+    }
+    match.scrollIntoView({ block: "nearest" });
+    match.click();
+    return { ok: true, role: this.getRole(el), name: this.getAccessibleName(el), selected: this.getAccessibleName(match) };
+  }
+
+  pressKey(key: string, ref?: string): ActionResult {
+    let target: HTMLElement | null;
+    if (ref) {
+      target = this.resolve(ref);
+      if (!target) return this.stale(ref);
+      target.focus();
+    } else {
+      target = (document.activeElement as HTMLElement | null) ?? document.body;
+    }
+    const parts = key.split("+").map((p) => p.trim());
+    const main = parts.pop() ?? key;
+    const mods = new Set(parts.map((p) => p.toLowerCase()));
+    const init: KeyboardEventInit = {
+      key: main,
+      code: codeFor(main),
+      bubbles: true,
+      cancelable: true,
+      shiftKey: mods.has("shift"),
+      ctrlKey: mods.has("control") || mods.has("ctrl"),
+      altKey: mods.has("alt"),
+      metaKey: mods.has("meta") || mods.has("cmd"),
     };
+
+    if (main === "Enter" && mods.size === 0) {
+      this.pressEnter(target!);
+    } else if (main === "Tab") {
+      // Synthetic Tab does not move focus, so move it ourselves.
+      const notCancelled = target!.dispatchEvent(new KeyboardEvent("keydown", init));
+      if (notCancelled) this.moveFocus(target!, init.shiftKey ? -1 : 1);
+      target!.dispatchEvent(new KeyboardEvent("keyup", init));
+    } else {
+      target!.dispatchEvent(new KeyboardEvent("keydown", init));
+      target!.dispatchEvent(new KeyboardEvent("keyup", init));
+    }
+    const focused = document.activeElement as HTMLElement | null;
+    return { ok: true, focused: focused && focused !== document.body ? `${this.getRole(focused)} "${this.getAccessibleName(focused)}"` : "" };
   }
 
-  extractTables(withinEl?: HTMLElement, maxRows: number = 25): string {
-    if (typeof document === "undefined") return "No tables found on page.";
-    const root = withinEl || document.body;
-    if (!root) return "No tables found on page.";
-    const tables = Array.from(root.querySelectorAll("table"));
-    if (tables.length === 0) return "No tables found on page.";
+  // Enter on a field: let page handlers see it; if nobody handled it inside a form, submit the form.
+  private pressEnter(target: HTMLElement): void {
+    const init: KeyboardEventInit = { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true } as KeyboardEventInit;
+    const notCancelled = target.dispatchEvent(new KeyboardEvent("keydown", init));
+    target.dispatchEvent(new KeyboardEvent("keypress", init));
+    target.dispatchEvent(new KeyboardEvent("keyup", init));
+    const form = target.closest("form");
+    if (notCancelled && form && !(target instanceof HTMLTextAreaElement) && !target.isContentEditable) {
+      form.requestSubmit ? form.requestSubmit() : form.submit();
+    }
+  }
 
-    const targetTable = tables[0];
-    const rows = Array.from(targetTable.querySelectorAll("tr")).slice(0, maxRows);
-    const tsvRows = rows.map((row) => {
-      const cells = Array.from(row.querySelectorAll("th, td"));
-      return cells.map((cell) => (cell.textContent || "").replace(/\t|\n/g, " ").trim()).join("\t");
+  private moveFocus(from: HTMLElement, step: 1 | -1): void {
+    const focusable = Array.from(
+      document.querySelectorAll<HTMLElement>("a[href], button, input, select, textarea, [tabindex]:not([tabindex='-1']), [contenteditable='true']"),
+    ).filter((el) => !(el as HTMLButtonElement).disabled && this.isVisible(el));
+    const index = focusable.indexOf(from);
+    focusable.at((index + step + focusable.length) % focusable.length)?.focus();
+  }
+
+  scroll(direction: "up" | "down", amount: "page" | "half", ref?: string): ActionResult {
+    let box: HTMLElement | null = null;
+    if (ref) {
+      box = this.resolve(ref);
+      if (!box) return this.stale(ref);
+    }
+    const height = box ? box.clientHeight : window.innerHeight;
+    const delta = (direction === "up" ? -1 : 1) * Math.round(height * (amount === "half" ? 0.5 : 0.85));
+    const before = box ? box.scrollTop : window.scrollY;
+    if (box) box.scrollBy({ top: delta, behavior: "instant" });
+    else window.scrollBy({ top: delta, behavior: "instant" });
+    const after = box ? box.scrollTop : window.scrollY;
+    return { ok: true, moved: Math.round(after - before), position: Math.round(after), height: box ? box.scrollHeight : document.documentElement.scrollHeight };
+  }
+
+  // ---- find / check / extract ----------------------------------------------------------
+
+  find(query: string, kind: "element" | "text"): string[] {
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    if (kind === "text") {
+      const text = this.pageText();
+      const lower = text.toLowerCase();
+      const hits: string[] = [];
+      let from = 0;
+      while (hits.length < 5) {
+        const at = lower.indexOf(q, from);
+        if (at < 0) break;
+        hits.push(`…${text.slice(Math.max(0, at - 60), at + q.length + 60).replace(/\s+/g, " ")}…`);
+        from = at + q.length;
+      }
+      return hits;
+    }
+    const words = q.split(/\W+/).filter(Boolean);
+    return this.scan()
+      .map((e) => {
+        const name = e.name.toLowerCase();
+        let score = name === q ? 10 : name.includes(q) ? 5 : 0;
+        for (const w of words) {
+          if (name.includes(w)) score += 2;
+          if (e.role === w) score += 1;
+        }
+        return { e, score };
+      })
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5)
+      .map(({ e }) => `${e.ref} ${e.role} "${e.name}"`);
+  }
+
+  // Resolves once the DOM had no changes for quietMs (e.g. a streamed chat reply finished), or at timeoutMs.
+  waitQuiet(quietMs: number, timeoutMs: number): Promise<{ quiet: boolean; waitedMs: number }> {
+    const started = Date.now();
+    return new Promise((resolve) => {
+      let quietTimer = setTimeout(() => done(true), quietMs);
+      const deadline = setTimeout(() => done(false), timeoutMs);
+      const observer = new MutationObserver(() => {
+        clearTimeout(quietTimer);
+        quietTimer = setTimeout(() => done(true), quietMs);
+      });
+      observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true });
+      function done(quiet: boolean) {
+        observer.disconnect();
+        clearTimeout(quietTimer);
+        clearTimeout(deadline);
+        resolve({ quiet, waitedMs: Date.now() - started });
+      }
     });
-
-    return `ok table ${tsvRows.length} rows\n` + tsvRows.join("\n");
   }
+
+  // One poll of browser_wait_for. URL conditions are checked by the service worker.
+  check(cond: { text?: string; gone_text?: string; ref?: string }): boolean {
+    const text = cond.text || cond.gone_text ? this.pageText().toLowerCase() : "";
+    if (cond.text && !text.includes(cond.text.toLowerCase())) return false;
+    if (cond.gone_text && text.includes(cond.gone_text.toLowerCase())) return false;
+    if (cond.ref) {
+      const el = this.resolve(cond.ref);
+      if (!el || !this.isVisible(el) || (el as HTMLButtonElement).disabled) return false;
+    }
+    return true;
+  }
+
+  extract(what: "links" | "table" | "fields", within: HTMLElement | null, filter: string, max: number): string {
+    const f = filter.toLowerCase();
+    const keep = (s: string) => !f || s.toLowerCase().includes(f);
+
+    if (what === "links") {
+      const lines = this.scan(within)
+        .filter((e) => e.role === "link" && e.href)
+        .map((e) => `${e.ref} "${e.name}" →${e.href}`)
+        .filter(keep)
+        .slice(0, max);
+      return `ok ${lines.length} links\n${lines.join("\n")}`;
+    }
+    if (what === "fields") {
+      const lines = this.scan(within)
+        .filter((e) => e.value !== undefined || e.checked !== undefined)
+        .map((e) => `${e.ref} ${e.role} "${e.name}" ${e.checked !== undefined ? (e.checked ? "[x]" : "[ ]") : `="${e.value}"`}`)
+        .filter(keep)
+        .slice(0, max);
+      return `ok ${lines.length} fields\n${lines.join("\n")}`;
+    }
+
+    const root = within ?? document.body;
+    const tables = Array.from(root.querySelectorAll("table")).filter((t) => this.isVisible(t as HTMLElement));
+    if (within instanceof HTMLTableElement) tables.unshift(within);
+    // The biggest table is usually the data one.
+    const table = tables.sort((a, b) => b.rows.length - a.rows.length)[0];
+    if (!table) return "ok 0 rows (no table here)";
+    const rows = Array.from(table.rows).map((row) =>
+      Array.from(row.cells)
+        .map((c) => (c.innerText || c.textContent || "").replace(/\s+/g, " ").trim())
+        .join("\t"),
+    );
+    const [header, ...body] = rows;
+    const kept = body.filter(keep).slice(0, max);
+    return `ok table ${kept.length} rows\n${[header ?? "", ...kept].join("\n")}`;
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function codeFor(key: string): string {
+  if (key.length === 1) return /[a-z]/i.test(key) ? `Key${key.toUpperCase()}` : /\d/.test(key) ? `Digit${key}` : key;
+  return key;
 }
 
 export const bigFishDOM = new BigFishDOMEngine();
-if (typeof window !== "undefined") {
-  (window as any).BigFishDOM = bigFishDOM;
-}

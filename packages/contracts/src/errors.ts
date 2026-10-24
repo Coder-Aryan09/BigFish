@@ -22,6 +22,15 @@ export const ErrorCode = {
 } as const;
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
 
+// HTTP API error codes, sent as { ok: false, code, message }.
+export const ApiErrorCode = {
+  UNAUTHORIZED: "UNAUTHORIZED",
+  INVALID_GOOGLE_TOKEN: "INVALID_GOOGLE_TOKEN",
+  AUTH_NOT_CONFIGURED: "AUTH_NOT_CONFIGURED",
+  BAD_REQUEST: "BAD_REQUEST",
+} as const;
+export type ApiErrorCode = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];
+
 export function toolError(code: ErrorCode, msg: string, hint?: string): string {
   return `ERROR ${code}: ${msg}${hint ? ` Hint: ${hint}` : ""}`;
 }

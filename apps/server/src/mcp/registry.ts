@@ -3,6 +3,8 @@
 import { CloseCode } from "@bigfish/contracts";
 import { type DeviceSession, sessionKey } from "./session.js";
 
+export const MAX_DEVICES_PER_USER = 3;
+
 export class SessionRegistry {
   private readonly sessions = new Map<string, DeviceSession>();
 

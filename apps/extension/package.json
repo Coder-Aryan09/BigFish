@@ -11,7 +11,10 @@
     "postinstall": "wxt prepare"
   },
   "dependencies": {
-    "@bigfish/contracts": "workspace:*"
+    "@bigfish/contracts": "workspace:*",
+    "@bigfish/mcp-ws": "workspace:*",
+    "@modelcontextprotocol/server": "2.4.0",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "typescript": "^7.0.2",

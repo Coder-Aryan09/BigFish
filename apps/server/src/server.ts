@@ -10,7 +10,7 @@ export interface StartOptions extends AppOptions {
 }
 
 export async function startServer(opts: StartOptions) {
-  const { app, registry, injectWebSocket, wss } = createApp(opts);
+  const { app, registry, tickets, injectWebSocket, wss } = createApp(opts);
 
   const server = await new Promise<ReturnType<typeof serve>>((resolve) => {
     const s = serve({ fetch: app.fetch, port: opts.port, hostname: opts.host }, () => resolve(s));
@@ -25,5 +25,5 @@ export async function startServer(opts: StartOptions) {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 
-  return { server, port, registry, close };
+  return { server, port, registry, tickets, close };
 }

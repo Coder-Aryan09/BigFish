@@ -1,4 +1,23 @@
 // BigFish Simplified Entry Controller
+import type { ConnState, ConnStatus } from "../background/conn/connection.js";
+
+const CONN_LABELS: Record<ConnState, string> = {
+  signed_out: "Signed out",
+  idle: "Starting",
+  ticket: "Connecting",
+  connecting: "Connecting",
+  mcp_init: "Connecting",
+  ready: "Connected",
+  backoff: "Retrying",
+  stopped: "Stopped",
+};
+
+interface StatusReply {
+  ok: boolean;
+  error?: string;
+  status?: ConnStatus;
+  email?: string | null;
+}
 
 document.addEventListener("DOMContentLoaded", () => {
   const inputEl = document.querySelector<HTMLTextAreaElement>("#cmd-input");
@@ -11,14 +30,57 @@ document.addEventListener("DOMContentLoaded", () => {
   const actionCards = document.querySelectorAll<HTMLButtonElement>(".action-card");
   const activeTabTitle = document.querySelector<HTMLElement>("#active-tab-title");
 
-  // Detect active tab title if running inside Chrome extension
-  if (typeof chrome !== "undefined" && chrome.tabs && chrome.tabs.query) {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs && tabs[0] && tabs[0].title && activeTabTitle) {
-        activeTabTitle.textContent = tabs[0].title;
-      }
-    });
+  const connIndicator = document.querySelector<HTMLElement>("#conn-indicator");
+  const connLabel = document.querySelector<HTMLElement>("#conn-label");
+  const connDetail = document.querySelector<HTMLElement>("#conn-detail");
+  const accountEmail = document.querySelector<HTMLElement>("#account-email");
+  const signInBtn = document.querySelector<HTMLButtonElement>("#btn-sign-in");
+  const signOutBtn = document.querySelector<HTMLButtonElement>("#btn-sign-out");
+  const connectBtn = document.querySelector<HTMLButtonElement>("#btn-connect");
+
+  // Detect active tab title
+  browser.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
+    if (tabs[0]?.title && activeTabTitle) {
+      activeTabTitle.textContent = tabs[0].title;
+    }
+  });
+
+  // Account and connection state, owned by the service worker
+  let signedInEmail: string | null = null;
+
+  function renderStatus(status: ConnStatus): void {
+    if (connIndicator) connIndicator.dataset.state = status.state;
+    if (connLabel) connLabel.textContent = CONN_LABELS[status.state];
+    if (connDetail) connDetail.textContent = status.state === "ready" ? "" : (status.detail ?? "");
+    if (connectBtn) connectBtn.hidden = !signedInEmail || !(status.state === "stopped" || status.state === "backoff");
   }
+
+  function renderAccount(email: string | null): void {
+    signedInEmail = email;
+    if (accountEmail) accountEmail.textContent = email ?? "Not signed in";
+    if (signInBtn) signInBtn.hidden = Boolean(email);
+    if (signOutBtn) signOutBtn.hidden = !email;
+  }
+
+  async function ask(type: string, button?: HTMLButtonElement | null): Promise<void> {
+    if (button) button.disabled = true;
+    try {
+      const reply = (await browser.runtime.sendMessage({ type })) as StatusReply;
+      if (!reply?.ok) {
+        if (connDetail) connDetail.textContent = reply?.error ?? "Request failed.";
+        return;
+      }
+      renderAccount(reply.email ?? null);
+      if (reply.status) renderStatus(reply.status);
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
+  signInBtn?.addEventListener("click", () => void ask("BIGFISH_SIGN_IN", signInBtn));
+  signOutBtn?.addEventListener("click", () => void ask("BIGFISH_SIGN_OUT", signOutBtn));
+  connectBtn?.addEventListener("click", () => void ask("BIGFISH_CONNECT", connectBtn));
+  void ask("BIGFISH_PANEL_OPENED");
 
   // Quick Action Cards trigger
   actionCards.forEach((card) => {
@@ -202,50 +264,54 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 700);
   }
 
-  // Listen for real approval requests from the background service worker
-  if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {
-    chrome.runtime.onMessage.addListener((msg) => {
-      if (msg?.type === "BIGFISH_APPROVAL_REQUEST") {
-        const req = msg.payload;
-        if (!feedView) return;
-        feedView.style.display = "flex";
-        if (welcomeView) welcomeView.style.display = "none";
+  // Listen for connection updates and real approval requests from the background service worker
+  browser.runtime.onMessage.addListener((msg: any) => {
+    if (msg?.type === "BIGFISH_CONN_STATUS") {
+      renderStatus(msg.status);
+      // A status change can mean a sign-in finished elsewhere. Refresh the email.
+      if (msg.status.state === "ready" && !signedInEmail) void ask("BIGFISH_GET_STATUS");
+      return;
+    }
+    if (msg?.type === "BIGFISH_APPROVAL_REQUEST") {
+      const req = msg.payload;
+      if (!feedView) return;
+      feedView.style.display = "flex";
+      if (welcomeView) welcomeView.style.display = "none";
 
-        const canvas = document.querySelector("#feed-canvas");
-        const approvalEl = document.createElement("div");
-        approvalEl.className = "agent-bubble";
-        approvalEl.style.borderLeft = "3px solid #f59e0b";
-        approvalEl.innerHTML = `
-          <div class="result-header">
-            <span class="result-badge" style="background:#fef3c7;color:#b45309;">⚠️ Approval Required</span>
-            <span class="result-tool">${escapeHtml(req.tool)}</span>
-          </div>
-          <div class="result-body">
-            <strong>${escapeHtml(req.reason)}</strong>
-            <p style="font-size:11px;color:#6b7280;margin:4px 0;">Target: ${escapeHtml(req.origin || "Current tab")}</p>
-            <div class="simple-approval-box" style="margin-top:8px;">
-              <div class="approval-btn-group">
-                <button class="btn-confirm-sm" id="btn-approve-${req.id}">Approve Action</button>
-                <button class="btn-cancel-sm" id="btn-deny-${req.id}">Deny</button>
-              </div>
+      const canvas = document.querySelector("#feed-canvas");
+      const approvalEl = document.createElement("div");
+      approvalEl.className = "agent-bubble";
+      approvalEl.style.borderLeft = "3px solid #f59e0b";
+      approvalEl.innerHTML = `
+        <div class="result-header">
+          <span class="result-badge" style="background:#fef3c7;color:#b45309;">⚠️ Approval Required</span>
+          <span class="result-tool">${escapeHtml(req.tool)}</span>
+        </div>
+        <div class="result-body">
+          <strong>${escapeHtml(req.reason)}</strong>
+          <p style="font-size:11px;color:#6b7280;margin:4px 0;">Target: ${escapeHtml(req.origin || "Current tab")}</p>
+          <div class="simple-approval-box" style="margin-top:8px;">
+            <div class="approval-btn-group">
+              <button class="btn-confirm-sm" id="btn-approve-${req.id}">Approve Action</button>
+              <button class="btn-cancel-sm" id="btn-deny-${req.id}">Deny</button>
             </div>
           </div>
-        `;
-        canvas?.appendChild(approvalEl);
-        if (canvas) canvas.scrollTop = canvas.scrollHeight;
+        </div>
+      `;
+      canvas?.appendChild(approvalEl);
+      if (canvas) canvas.scrollTop = canvas.scrollHeight;
 
-        document.getElementById(`btn-approve-${req.id}`)?.addEventListener("click", () => {
-          chrome.runtime.sendMessage({ type: "RESOLVE_APPROVAL", id: req.id, approved: true });
-          approvalEl.innerHTML = `<span style="color:#059669;font-weight:600;font-size:12px;">✓ Approved by user</span>`;
-        });
+      document.getElementById(`btn-approve-${req.id}`)?.addEventListener("click", () => {
+        browser.runtime.sendMessage({ type: "RESOLVE_APPROVAL", id: req.id, approved: true });
+        approvalEl.innerHTML = `<span style="color:#059669;font-weight:600;font-size:12px;">✓ Approved by user</span>`;
+      });
 
-        document.getElementById(`btn-deny-${req.id}`)?.addEventListener("click", () => {
-          chrome.runtime.sendMessage({ type: "RESOLVE_APPROVAL", id: req.id, approved: false });
-          approvalEl.innerHTML = `<span style="color:#dc2626;font-size:12px;">✗ Denied by user</span>`;
-        });
-      }
-    });
-  }
+      document.getElementById(`btn-deny-${req.id}`)?.addEventListener("click", () => {
+        browser.runtime.sendMessage({ type: "RESOLVE_APPROVAL", id: req.id, approved: false });
+        approvalEl.innerHTML = `<span style="color:#dc2626;font-size:12px;">✗ Denied by user</span>`;
+      });
+    }
+  });
 
   function escapeHtml(str: string): string {
     const div = document.createElement("div");

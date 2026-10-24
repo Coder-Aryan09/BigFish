@@ -32,9 +32,9 @@
         </div>
 
         <div class="header-status">
-          <div class="status-indicator" title="Connected to local bridge (ws://127.0.0.1:8787)">
+          <div id="conn-indicator" class="status-indicator" data-state="idle" title="Connection to the BigFish server">
             <span class="pulse-dot"></span>
-            <span class="status-label">Ready</span>
+            <span id="conn-label" class="status-label">Starting</span>
           </div>
           <button id="btn-reset" class="btn-ghost-icon" title="New Session / Reset" aria-label="Reset">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -45,6 +45,19 @@
           </button>
         </div>
       </header>
+
+      <!-- Account: Google sign-in and connection detail -->
+      <div class="account-bar">
+        <div class="account-info">
+          <span id="account-email" class="account-email">Not signed in</span>
+          <span id="conn-detail" class="conn-detail"></span>
+        </div>
+        <div class="account-actions">
+          <button id="btn-connect" class="btn-account" hidden>Connect</button>
+          <button id="btn-sign-in" class="btn-account primary">Sign in with Google</button>
+          <button id="btn-sign-out" class="btn-account" hidden>Sign out</button>
+        </div>
+      </div>
 
       <!-- Active Page Pill -->
       <div class="active-tab-strip">

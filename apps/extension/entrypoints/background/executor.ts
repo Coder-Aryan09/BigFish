@@ -8,8 +8,22 @@ import { rehydrateArgs } from "../../safety/privacy.js";
 import { classifyAction } from "../../safety/action-policy.js";
 import { approvals } from "../../safety/approval.js";
 
+export interface ExecuteOptions {
+  // Aborted when the server cancels the MCP call.
+  signal?: AbortSignal;
+  runId?: string;
+}
+
 export class BrowserToolExecutor {
-  async execute(tool: string, rawArgs: any, callerClient: string = "mcp"): Promise<{ ok: boolean; text: string; meta?: any }> {
+  async execute(
+    tool: string,
+    rawArgs: any,
+    callerClient: string = "mcp",
+    opts: ExecuteOptions = {},
+  ): Promise<{ ok: boolean; text: string; meta?: any }> {
+    if (opts.signal?.aborted) {
+      return { ok: false, text: toolError(ErrorCode.TIMEOUT, `${tool} was cancelled before it started.`) };
+    }
     try {
       switch (tool) {
         case "browser_ping":

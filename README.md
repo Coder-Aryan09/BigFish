@@ -13,21 +13,22 @@ Early skeleton. Most files are stubs.
 | Part | State |
 |---|---|
 | Monorepo, workspace, TypeScript config | Done |
-| Server: `/health` and `/mcp` routes | Running |
-| Server: bridge to the extension | Stub, always "not connected" |
+| Server: `/health`, Google login, `/mcp-ws` (extension is the MCP server, server is the MCP client) | Running |
+| Server: device sessions per user (max 3), tool calls one at a time per device | Running |
 | Server: agent (graph, models, tinyfish, tools) | Not built yet |
-| Extension: service worker, side panel | Boots, no features yet |
+| Extension: Google sign-in, MCP connection with reconnect, side panel account bar | Running |
 | Extension: safety modules | Files present, not wired |
-| Auth on `/mcp` (bearer tokens) | Not built yet |
+| Auth: Google token -> JWT -> one-time ticket for `/mcp-ws` | Running |
 | ML | Roadmap only |
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `packages/contracts` | Shared zod tool schemas, bridge messages, error codes |
+| `packages/contracts` | Shared zod tool schemas, wire protocol, error codes |
+| `packages/mcp-ws` | MCP over one WebSocket: framing, handshake, heartbeats (used by server and extension) |
 | `apps/extension` | WXT Chrome extension (background, content, side panel, safety) |
-| `apps/server` | Node + Hono server on `127.0.0.1:8787` (`/health`, `/mcp`) |
+| `apps/server` | Node + Hono server on `127.0.0.1:8787` (`/health`, `/api/auth/google`, `/api/ws-ticket`, `/api/devices`, `/mcp-ws`) |
 | `ML` | Python (uv) ML experiments, roadmap only |
 | `Docs` | Build plan |
 | `scripts` | Helper scripts (empty for now) |
@@ -62,14 +63,16 @@ All live in `apps/server/.env`.
 |---|---|---|
 | `PORT` | `8787` | Server port. Read today |
 | `HOST` | `127.0.0.1` | Bind address. Keep it local. Read today |
-| `ANTHROPIC_API_KEY` | empty | Key for the agent model. Used once the agent is built |
-| `AGENT_MODEL` | `claude-sonnet-5-5` | Model for the agent. Used once the agent is built |
+| `MISTRAL_API_KEY` | empty | Mistral key for the agent model. Used once the agent is built |
+| `AGENT_MODEL` | `mistral-medium-latest` | Mistral model for the agent (must support tool calling). Used once the agent is built |
 | `TINYFISH_API_KEY` | empty | TinyFish key for public web research. Used once the agent is built |
 | `TINYFISH_REPLAY` | `0` | `1` replays cached TinyFish runs |
-| `USE_MCP_LOOPBACK` | `0` | `1` makes the agent call the browser through MCP instead of in-process |
-| `MCP_TOKEN_CLAUDE_CODE` | empty | Bearer token for Claude Code. Not enforced yet |
-| `MCP_TOKEN_INSPECTOR` | empty | Bearer token for MCP Inspector. Not enforced yet |
-| `DEVICE_TOKEN` | empty | Token for the extension bridge. Not enforced yet |
+| `GOOGLE_EXTENSION_CLIENT_ID` | empty | Google OAuth client (type "Chrome Extension"). Required unless dev routes are on |
+| `JWT_SECRET` | empty | Signs BigFish JWTs. At least 32 random characters. Required unless dev routes are on |
+| `EXTENSION_ID` | empty | Fixed extension ID. `/mcp-ws` only accepts this Origin. Required unless dev routes are on |
+| `ENABLE_DEV_ROUTES` | `0` | `1` adds dev login, device list and ping under `/api/dev`, and relaxes missing auth values. Never in production |
+
+The extension reads `apps/extension/.env` (see `.env.example` there): `WXT_SERVER_URL`, `WXT_EXTENSION_KEY` (public key only), `WXT_GOOGLE_CLIENT_ID`.
 
 ## Run
 
@@ -100,7 +103,7 @@ If `pnpm dev:ext` does not open Chrome for you:
 2. Open `chrome://extensions`
 3. Turn on **Developer mode**
 4. Click **Load unpacked**
-5. Pick the folder `apps/extension/.output/chrome-mv3`
+5. Pick the folder `apps/extension/dist/chrome-mv3`
 
 ## Scripts
 
@@ -146,11 +149,11 @@ node agent-guardrails/test-guardrails.mjs
 | `pnpm: command not found` or wrong version | Run `corepack enable`, then retry |
 | Node version error | Install Node 22 or newer |
 | Port 8787 already in use | Set a different `PORT` in `apps/server/.env` |
-| `/health` shows `"bridge": false` | Expected for now, the bridge is a stub |
-| MCP tool says "Extension not connected" | Same reason, the bridge is not built yet |
+| Server exits with `Missing auth config` | Fill `GOOGLE_EXTENSION_CLIENT_ID`, `JWT_SECRET`, `EXTENSION_ID`, or set `ENABLE_DEV_ROUTES=1` for local work |
+| Side panel stays "Signed out" after clicking sign in | Check `WXT_GOOGLE_CLIENT_ID` and `WXT_EXTENSION_KEY`, then rebuild and reload the extension |
 | Extension type errors after install | Run `pnpm --filter @bigfish/extension exec wxt prepare` |
 
 ## Security notes
 
-- The server binds to `127.0.0.1` only. Do not change `HOST` to `0.0.0.0` until `/mcp` has auth.
+- The server binds to `127.0.0.1` by default. Before exposing it, run without `ENABLE_DEV_ROUTES` and with all three auth values set.
 - Never commit `.env` files, keys, or tokens. `.gitignore` blocks them.

@@ -23,7 +23,7 @@ New project name is **BigFish**. The old name does not appear anywhere in the ne
 | MCP | `@modelcontextprotocol/server` v2 (spec 2026-07-28, serves 2025 clients statelessly) | Fallback: v1 `@modelcontextprotocol/sdk` stateless `StreamableHTTPServerTransport` |
 | Our agent → browser | In-process tools generated from the same contracts, calling `bridge.call()` | No protocol hop. Optional `USE_MCP_LOOPBACK=1` via `@langchain/mcp-adapters` for the story |
 | TinyFish | `@tiny-fish/sdk` `agent.stream` (REST SSE), not its MCP | Proven in `src/agent/tinyfish-agent.js`; its MCP needs OAuth. Claude Code uses TinyFish MCP itself in the demo |
-| Agent model | Sonnet-class tool-calling model via `.env` (`claude-sonnet-5-5` via `@langchain/anthropic`), fallbacks from `models.js` | Reliability of tool calls matters most |
+| Agent model | Sonnet-class tool-calling model via `.env` (`mistral-medium-latest` via `@langchain/mistralai`), fallbacks from `models.js` | Reliability of tool calls matters most |
 | Checkpointer | `MemorySaver` | State stays small (no outer message history) |
 | ML (Python OCR/NER/YOLO) | Skip. Regex vault only. Roadmap slide | Unwired prototype, not portable in 24h |
 
@@ -75,12 +75,12 @@ Source paths are in the old repo `/Users/home/Desktop/PS- 26171`. Ignore every `
 **apps/server/src**
 - `bridge.ts`: `call(tool,args,{client,runId,timeoutMs})`, FIFO lock per tab slot, 30s default, 120s for approval-capable calls.
 - `mcp.ts`: `registerTool` loop over contracts, bearer token → client name map (`claude-code`, `agent`, `inspector`), Origin check, ~120 token server `instructions`.
-- `agent/models.ts` ← `src/agent/models.js` (`makeModel`, `makeModelWithFallbacks`) + Anthropic provider.
+- `agent/models.ts` ← `src/agent/models.js` (`makeModel`, `makeModelWithFallbacks`) + Mistral provider.
 - `agent/tinyfish.ts` ← `_runSSE` logic of `src/agent/tinyfish-agent.js` on `@tiny-fish/sdk`, max 3 parallel, 120s each, `TINYFISH_REPLAY=1` record/replay cache.
 - `agent/loop-guard.ts` ← `detectLoop`, `isRepeatedAction` from `src/agent/middleware.js`, as tool-call middleware.
 - `agent/graph.ts`, `agent/tools.ts`, `runs.ts`: new.
 - `fixtures/` ← `scripts/eval/fixtures/*` + new `mail.html`, `calendar.html`, `pii-form.html`.
-- `scripts/eval.mjs` ← `scripts/eval-agent.mjs` + `tasks.mjs` (puppeteer + Chrome for Testing + `--load-extension=apps/extension/.output/chrome-mv3`).
+- `scripts/eval.mjs` ← `scripts/eval-agent.mjs` + `tasks.mjs` (puppeteer + Chrome for Testing + `--load-extension=apps/extension/dist/chrome-mv3`).
 - Tests ← vault and policy parts of the current safety tests.
 
 **Not ported:** rest of `src/agent/*`, `jev-guard`, `ML/`, `observability/`.

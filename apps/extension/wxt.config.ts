@@ -7,6 +7,6 @@ export default defineConfig({
     minimum_chrome_version: "116",
     permissions: ["tabs", "activeTab", "scripting", "storage", "sidePanel", "tabGroups", "alarms"],
     host_permissions: ["<all_urls>"],
-    action: { default_title: "BigFish" },
+    action: { default_title: "BigFish", default_icon: "icon/icon.svg" },
   },
 });

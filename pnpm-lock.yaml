@@ -167,6 +167,10 @@ importers:
   .: {}
 
   apps/extension:
+    dependencies:
+      '@bigfish/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
     devDependencies:
       typescript:
         specifier: ^7.0.2

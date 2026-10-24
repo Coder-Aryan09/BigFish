@@ -202,6 +202,51 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 700);
   }
 
+  // Listen for real approval requests from the background service worker
+  if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg?.type === "BIGFISH_APPROVAL_REQUEST") {
+        const req = msg.payload;
+        if (!feedView) return;
+        feedView.style.display = "flex";
+        if (welcomeView) welcomeView.style.display = "none";
+
+        const canvas = document.querySelector("#feed-canvas");
+        const approvalEl = document.createElement("div");
+        approvalEl.className = "agent-bubble";
+        approvalEl.style.borderLeft = "3px solid #f59e0b";
+        approvalEl.innerHTML = `
+          <div class="result-header">
+            <span class="result-badge" style="background:#fef3c7;color:#b45309;">⚠️ Approval Required</span>
+            <span class="result-tool">${escapeHtml(req.tool)}</span>
+          </div>
+          <div class="result-body">
+            <strong>${escapeHtml(req.reason)}</strong>
+            <p style="font-size:11px;color:#6b7280;margin:4px 0;">Target: ${escapeHtml(req.origin || "Current tab")}</p>
+            <div class="simple-approval-box" style="margin-top:8px;">
+              <div class="approval-btn-group">
+                <button class="btn-confirm-sm" id="btn-approve-${req.id}">Approve Action</button>
+                <button class="btn-cancel-sm" id="btn-deny-${req.id}">Deny</button>
+              </div>
+            </div>
+          </div>
+        `;
+        canvas?.appendChild(approvalEl);
+        if (canvas) canvas.scrollTop = canvas.scrollHeight;
+
+        document.getElementById(`btn-approve-${req.id}`)?.addEventListener("click", () => {
+          chrome.runtime.sendMessage({ type: "RESOLVE_APPROVAL", id: req.id, approved: true });
+          approvalEl.innerHTML = `<span style="color:#059669;font-weight:600;font-size:12px;">✓ Approved by user</span>`;
+        });
+
+        document.getElementById(`btn-deny-${req.id}`)?.addEventListener("click", () => {
+          chrome.runtime.sendMessage({ type: "RESOLVE_APPROVAL", id: req.id, approved: false });
+          approvalEl.innerHTML = `<span style="color:#dc2626;font-size:12px;">✗ Denied by user</span>`;
+        });
+      }
+    });
+  }
+
   function escapeHtml(str: string): string {
     const div = document.createElement("div");
     div.textContent = str;

@@ -1,286 +1,248 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BigFish — Sovereign Agentic Shield</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/light_favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div id="app" class="app-layout">
+      <!-- Minimalist Frosted Glass Header -->
+      <header class="app-header">
+        <div class="brand">
+          <svg class="brand-logo" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="32" height="32" rx="8" fill="url(#bf-grad)" />
+            <path d="M7 16C10.5 11 16 9.5 22 11C20.5 14 20.5 18 22 21C16 22.5 10.5 21 7 16Z" fill="white" fill-opacity="0.95" />
+            <path d="M22 16L26 12V20L22 16Z" fill="white" fill-opacity="0.9" />
+            <circle cx="12" cy="14.5" r="1.5" fill="#1d4ed8" />
+            <defs>
+              <linearGradient id="bf-grad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#2563EB" />
+                <stop offset="1" stop-color="#1D4ED8" />
+              </linearGradient>
+            </defs>
+          </svg>
+          <span class="brand-name">BigFish</span>
+          <span class="brand-tag">Browser Agent</span>
+        </div>
 
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BigFish — Sovereign Agentic Shield</title>
-  <link rel="icon" type="image/svg+xml" href="/assets/light_favicon.svg">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap"
-    rel="stylesheet">
-  <link rel="stylesheet" href="./style.css">
-</head>
+        <div class="header-status">
+          <div id="conn-indicator" class="status-indicator" data-state="idle" title="Connection to the BigFish server">
+            <span class="pulse-dot"></span>
+            <span id="conn-label" class="status-label">Starting</span>
+          </div>
 
-<body>
-  <div class="chat-app-root">
+          <button id="btn-cursor" class="btn-ghost-icon btn-cursor" title="Agent cursor: on" aria-label="Show the agent cursor on the page" aria-pressed="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
+              <path d="M4 3l15 9-6.5 1.4L9.3 20z"></path>
+            </svg>
+          </button>
 
-    <!-- Top Navigation Header -->
-    <header class="app-header">
-      <div class="header-left">
-        <div class="brand-badge" title="BigFish — Sovereign Agentic Shield">
-          <img src="/assets/dark_logo.svg" alt="BigFish" class="brand-header-logo">
+          <button id="btn-theme-toggle" class="btn-ghost-icon btn-theme-toggle" title="Toggle Theme (Dark / Light)" aria-label="Toggle Theme">
+            <span class="theme-icon-dark" style="font-size: 13px;">☀️</span>
+            <span class="theme-icon-light" style="display: none; font-size: 13px;">🌙</span>
+          </button>
+
+          <button id="btn-reset" class="btn-ghost-icon" title="New Session / Reset" aria-label="Reset">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
+              <path d="M3 22v-6h6"></path>
+              <path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path>
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- Account: Google sign-in and connection detail -->
+      <div class="account-bar">
+        <div class="account-info">
+          <span id="account-email" class="account-email">Not signed in</span>
+          <span id="conn-detail" class="conn-detail"></span>
+        </div>
+        <div class="account-actions">
+          <button id="btn-connect" class="btn-account" hidden>Connect</button>
+          <button id="btn-sign-in" class="btn-account primary">Sign in with Google</button>
+          <button id="btn-sign-out" class="btn-account" hidden>Sign out</button>
         </div>
       </div>
 
-      <div class="header-right">
-        <button id="newChatBtn" class="btn-new-chat" title="Start a fresh conversation" aria-label="New Chat">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
-            stroke-linecap="round" stroke-linejoin="round">
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
+      <!-- Active Page Strip -->
+      <div class="active-tab-strip">
+        <div class="tab-indicator-badge">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="2" y1="12" x2="22" y2="12"></line>
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
           </svg>
-          <span>New Chat</span>
-        </button>
-
-        <button id="themeToggleBtn" class="header-icon-btn" title="Toggle Theme (Dark / Light)" aria-label="Toggle Theme">
-          <span id="themeIconDark">☀️</span>
-          <span id="themeIconLight" style="display:none;">🌙</span>
-        </button>
-
-        <button id="settingsBtn" class="header-icon-btn" title="Agent Settings" aria-label="Settings">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-            stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="3" />
-            <path
-              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          <span id="active-tab-title" class="tab-name">Current Webpage</span>
+        </div>
+        <span class="privacy-badge">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
           </svg>
-        </button>
+          Local PII Shield
+        </span>
       </div>
-    </header>
 
-    <!-- Hexagonal Vault WebGL2 Background (Interactive Hex Grid with Cursor Follow Soft Light) -->
-    <div class="ambient-chat-aura" id="ambientAura" data-state="idle" aria-hidden="true">
-      <canvas id="particleWaveCanvas" class="particle-wave-canvas"></canvas>
-    </div>
-
-    <!-- Main Scrollable Chat Stream Container -->
-    <main class="chat-thread-container" id="chatContainer">
-
-      <div class="chat-messages" id="chatMessages">
-        <section class="welcome-state" id="welcomeScreen" aria-labelledby="welcomeTitle">
-          <!-- Floating Waving Robot (Greets user and waves hi infinitely until command is given) -->
-          <div class="welcome-robot-stage" id="welcomeRobotStage" aria-hidden="true">
+      <!-- Main Canvas -->
+      <main class="main-canvas" id="main-canvas">
+        <!-- Welcome Hero View (Shown initially) -->
+        <div id="welcome-view" class="welcome-container">
+          <!-- Robot Mascot Stage -->
+          <div class="welcome-robot-stage" aria-hidden="true">
             <picture>
-              <source srcset="/assets/robot-waving.webp" type="image/webp">
-              <img src="/assets/robot-waving.gif" alt="Autonomous AI Robot Greeting" class="welcome-robot-media" id="welcomeRobotMedia" />
+              <source srcset="/assets/robot-waving.webp" type="image/webp" />
+              <img src="/assets/robot-waving.gif" alt="Autonomous AI Robot Greeting" class="welcome-robot-media" />
             </picture>
           </div>
 
-          <h1 id="welcomeTitle">What would you like me to do on this page?</h1>
-          <p class="welcome-subtitle">Direct, zero-lag browser autonomy powered by sovereign on-device visual shield.
-          </p>
+          <div class="hero-section">
+            <div class="hero-badge">BigFish AI</div>
+            <h1 class="hero-title">What do you want me to do?</h1>
+            <p class="hero-subtitle">
+              Ask anything, drive this browser tab, fill forms, or extract data with zero sensitive data leaks.
+            </p>
+          </div>
 
-          <!-- Pre-Task Suggestion Pills -->
-          <div class="welcome-pretasks" id="welcomePretasks" role="group" aria-label="Suggested quick tasks">
-            <button type="button" class="pretask-pill" data-task="Summarize this page in 3 key takeaways"
-              title="Summarize page content">
-              <span class="pretask-icon">📋</span>
-              <span class="pretask-text">Summarize page</span>
+          <!-- Starter Quick Actions -->
+          <div class="quick-actions-grid">
+            <button class="action-card" data-cmd="Summarize the key information and takeaways from this page">
+              <div class="action-icon blue">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                  <line x1="16" y1="13" x2="8" y2="13"></line>
+                  <line x1="16" y1="17" x2="8" y2="17"></line>
+                </svg>
+              </div>
+              <div class="action-text">
+                <span class="action-title">Summarize page</span>
+                <span class="action-desc">Extract key points and structure</span>
+              </div>
+              <span class="action-arrow">→</span>
             </button>
-            <button type="button" class="pretask-pill"
-              data-task="Extract all data, tables, and statistics from this page" title="Extract structured data">
-              <span class="pretask-icon">📊</span>
-              <span class="pretask-text">Extract data</span>
+
+            <button class="action-card" data-cmd="Inspect all form inputs on this page and safely autofill them">
+              <div class="action-icon emerald">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                </svg>
+              </div>
+              <div class="action-text">
+                <span class="action-title">Fill out form</span>
+                <span class="action-desc">Auto-populate with safe local vault</span>
+              </div>
+              <span class="action-arrow">→</span>
             </button>
-            <button type="button" class="pretask-pill"
-              data-task="Find inputs on this page and help me fill out the form" title="Fill out inputs and forms">
-              <span class="pretask-icon">✍️</span>
-              <span class="pretask-text">Fill form</span>
+
+            <button class="action-card" data-cmd="Extract table and pricing data into a structured JSON list">
+              <div class="action-icon purple">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                  <line x1="3" y1="9" x2="21" y2="9"></line>
+                  <line x1="3" y1="15" x2="21" y2="15"></line>
+                  <line x1="9" y1="3" x2="9" y2="21"></line>
+                </svg>
+              </div>
+              <div class="action-text">
+                <span class="action-title">Extract table data</span>
+                <span class="action-desc">Export rows &amp; items to clean data</span>
+              </div>
+              <span class="action-arrow">→</span>
             </button>
-            <button type="button" class="pretask-pill"
-              data-task="Locate the primary action buttons and navigation links on this page"
-              title="Identify main buttons and actions">
-              <span class="pretask-icon">⚡</span>
-              <span class="pretask-text">Key actions</span>
+
+            <button class="action-card" data-cmd="Scan this page for tracking pixels, hidden inputs, and PII exposure">
+              <div class="action-icon amber">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                  <circle cx="12" cy="11" r="3"></circle>
+                </svg>
+              </div>
+              <div class="action-text">
+                <span class="action-title">Inspect privacy</span>
+                <span class="action-desc">Audit trackers and sensitive fields</span>
+              </div>
+              <span class="action-arrow">→</span>
             </button>
           </div>
-        </section>
-      </div>
-    </main>
-
-    <!-- Bottom Input Dock -->
-    <footer class="chat-input-dock" id="inputDock">
-      <!-- Agent Thinking & Working Flying Robot Patrol — Positioned directly on top of the "Ask me to do something" bar -->
-      <div class="agent-patrol-banner" id="agentPatrolBanner" aria-live="polite" aria-label="Agent thinking and working">
-        <div class="patrol-robot-stage">
-          <picture>
-            <source srcset="/assets/robot-patrol.webp" type="image/webp">
-            <img src="/assets/robot-patrol.gif" alt="Autonomous Agent Patrolling" class="patrol-robot-media" id="patrolRobotMedia" />
-          </picture>
         </div>
-        <div class="patrol-status-pill">
-          <span class="patrol-pulse-beacon"></span>
-          <span class="patrol-status-text" id="patrolStatusText">Agent analyzing &amp; reasoning…</span>
-        </div>
-      </div>
 
-      <div class="dock-input-row">
-        <textarea id="promptInput" rows="1" placeholder="Ask me to do something on this page…"
-          autocomplete="off"></textarea>
+        <!-- Task Feed View (Populated dynamically by main.ts) -->
+        <div id="feed-view" class="feed-container" style="display: none;"></div>
+      </main>
 
-        <div class="dock-actions">
-          <button id="stopBtn" class="btn-stop-dock" style="display:none;" title="Stop agent" aria-label="Stop agent">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
-              <rect x="5" y="5" width="14" height="14" rx="2" />
-            </svg>
-            <span class="visually-hidden">Stop</span>
-          </button>
-          <button id="runBtn" class="btn-send-dock" title="Send message (Enter)" aria-label="Run Agent">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
-              stroke-linecap="round" stroke-linejoin="round">
-              <line x1="12" y1="19" x2="12" y2="5" />
-              <polyline points="5 12 12 5 19 12" />
-            </svg>
-          </button>
-        </div>
-      </div>
-      <div class="dock-shortcut-hint">
-        <span>Press <strong>Enter ↵</strong> to send • <strong>Shift+Enter</strong> for newline</span>
-      </div>
-    </footer>
+      <!-- Bottom Command & Input Area -->
+      <footer class="app-footer">
+        <div class="input-card">
+          <textarea
+            id="cmd-input"
+            class="input-textarea"
+            placeholder="Ask BigFish what to do on this page... (e.g. click button, summarize, extract)"
+            rows="1"
+          ></textarea>
 
-  </div><!-- /chat-app-root -->
+          <div class="input-bar-controls">
+            <div class="bar-left">
+              <button id="btn-quick-command" class="chip-cmd" title="Quick slash commands">
+                <span class="slash">/</span>
+                <span>Commands</span>
+              </button>
+              <span id="input-hint" class="keyboard-tip" data-state="idle">Enter to run</span>
+            </div>
 
-  <!-- Settings Modal -->
-  <div class="modal-overlay" id="settingsModal" style="display:none;">
-    <div class="modal-card">
-      <div class="modal-header">
-        <div class="modal-header-brand">
-          <div class="modal-brand-dot"></div>
-          <h3>Agent Engine Settings</h3>
-        </div>
-        <button id="closeSettingsBtn" class="icon-close">&times;</button>
-      </div>
-      <div class="modal-body">
-        <!-- Bring Your Own Key notice -->
-        <div class="vault-security-card">
-          <div class="vault-icon-pill">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
-              stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-              <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-            </svg>
+            <div class="bar-right">
+              <button id="btn-mic" class="btn-mic" title="Voice input" aria-label="Voice input" aria-pressed="false" data-listening="false">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="2" width="6" height="12" rx="3"></rect>
+                  <path d="M5 10a7 7 0 0 0 14 0"></path>
+                  <line x1="12" y1="17" x2="12" y2="22"></line>
+                </svg>
+              </button>
+              <button id="btn-submit" class="btn-submit" title="Run command (Enter)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="5" y1="12" x2="19" y2="12"></line>
+                  <polyline points="12 5 19 12 12 19"></polyline>
+                </svg>
+              </button>
+            </div>
           </div>
-          <div class="vault-info">
-            <div class="vault-heading">Your Keys Stay On This Device</div>
-            <div class="vault-sub">Paste your own API key below. It is saved only in this browser and sent only to the provider you pick.</div>
+        </div>
+
+        <!-- Quick Slash Command Dropdown -->
+        <div id="slash-menu" class="slash-menu" style="display: none;">
+          <div class="menu-item" data-cmd="/summarize">
+            <strong>/summarize</strong>
+            <span>Summarize page content</span>
           </div>
-          <span class="vault-badge">🔒 Local</span>
+          <div class="menu-item" data-cmd="/extract">
+            <strong>/extract</strong>
+            <span>Extract tables &amp; items to JSON</span>
+          </div>
+          <div class="menu-item" data-cmd="/fill">
+            <strong>/fill</strong>
+            <span>Safely populate input fields</span>
+          </div>
+          <div class="menu-item" data-cmd="/click">
+            <strong>/click</strong>
+            <span>Click element or button by name</span>
+          </div>
+          <div class="menu-item" data-cmd="/privacy">
+            <strong>/privacy</strong>
+            <span>Inspect client-side PII vault</span>
+          </div>
         </div>
-
-        <div class="form-group">
-          <label for="engineSelect">Planner Engine / AI Provider</label>
-          <select id="engineSelect" class="form-input">
-            <option value="tinyfish">⚡ TinyFish Agent API (Cloud Browser) ★ Sponsored</option>
-            <option value="mistral">Mistral AI (codestral-latest)</option>
-            <option value="openrouter">OpenRouter (deepseek/deepseek-v4.1-flash)</option>
-            <option value="gemini">Google Gemini (gemini-3.5-flash)</option>
-            <option value="deterministic">Deterministic Semantic Planner (Offline / 0-Config)</option>
-          </select>
-          <small class="form-hint">TinyFish runs tasks in a managed cloud browser. Other options run locally via LangGraph (Mistral, OpenRouter, Gemini).</small>
-        </div>
-
-        <!-- Provider fields -->
-        <div class="form-group" data-provider="tinyfish" style="display:none;">
-          <label for="tinyfishApiKey">TinyFish API Key</label>
-          <input type="password" id="tinyfishApiKey" class="form-input" placeholder="tf-…" autocomplete="off">
-          <small class="form-hint">Get your API key at <a href="https://agent.tinyfish.ai/api-keys" target="_blank" style="color:#6ee7f7;">agent.tinyfish.ai/api-keys</a>. TinyFish is the hackathon sponsor — try it first!</small>
-        </div>
-
-        <div class="form-group" data-provider="openrouter" style="display:none;">
-          <label for="openrouterApiKey">OpenRouter API Key</label>
-          <input type="password" id="openrouterApiKey" class="form-input" placeholder="sk-or-…" autocomplete="off">
-          <small class="form-hint">Get your API key at <a href="https://openrouter.ai/keys" target="_blank" style="color:#6ee7f7;">openrouter.ai/keys</a>.</small>
-          <label for="openrouterModel">OpenRouter Model</label>
-          <select id="openrouterModel" class="form-input">
-            <option value="deepseek/deepseek-v4.1-flash" selected>deepseek/deepseek-v4.1-flash (Default)</option>
-            <option value="deepseek/deepseek-chat">deepseek/deepseek-chat (DeepSeek V3)</option>
-            <option value="deepseek/deepseek-chat:free">deepseek/deepseek-chat:free (100% Free)</option>
-            <option value="deepseek/deepseek-r1:free">deepseek/deepseek-r1:free (Free Reasoning)</option>
-            <option value="meta-llama/llama-3.3-70b-instruct:free">meta-llama/llama-3.3-70b-instruct:free (Free)</option>
-          </select>
-        </div>
-
-        <div class="form-group" data-provider="mistral">
-          <label for="mistralApiKey">Mistral API Key</label>
-          <input type="password" id="mistralApiKey" class="form-input" placeholder="Paste your Mistral key" autocomplete="off">
-          <small class="form-hint">Get your API key at <a href="https://console.mistral.ai/api-keys" target="_blank" style="color:#6ee7f7;">console.mistral.ai/api-keys</a>.</small>
-          <label for="mistralModel">Mistral Model</label>
-          <select id="mistralModel" class="form-input">
-            <option value="codestral-latest" selected>codestral-latest (Codestral Reasoning Agent)</option>
-            <option value="open-mistral-nemo">open-mistral-nemo (High Capacity)</option>
-            <option value="ministral-8b-latest">ministral-8b-latest (Lightweight)</option>
-          </select>
-        </div>
-
-        <div class="form-group" data-provider="gemini" style="display:none;">
-          <label for="geminiApiKey">Gemini API Key</label>
-          <input type="password" id="geminiApiKey" class="form-input" placeholder="Paste your Gemini key" autocomplete="off">
-          <small class="form-hint">Get your API key at <a href="https://aistudio.google.com/apikey" target="_blank" style="color:#6ee7f7;">aistudio.google.com/apikey</a>.</small>
-          <label for="geminiModel">Gemini Model</label>
-          <select id="geminiModel" class="form-input">
-            <option value="gemini-3.5-flash" selected>gemini-3.5-flash</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label for="privacyLevel">Privacy Firewall Strictness</label>
-          <select id="privacyLevel" class="form-input">
-            <option value="strict">Strict (Verhoeff Aadhaar + PAN + Phone + Email)</option>
-            <option value="standard">Standard (Email + Phone)</option>
-          </select>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button id="saveSettingsBtn" class="btn-primary">Save Settings</button>
-      </div>
+      </footer>
     </div>
-  </div>
 
-  <!-- Human-in-the-Loop Action Approval Modal -->
-  <div class="modal-overlay" id="approvalModal" style="display:none;">
-    <div class="modal-card">
-      <div class="modal-header">
-        <div class="modal-header-brand">
-          <div class="modal-brand-dot" style="background: #f59e0b;"></div>
-          <h3>Action Approval Required</h3>
-        </div>
-      </div>
-      <div class="modal-body">
-        <div class="vault-security-card" style="border-color: rgba(245, 158, 11, 0.4);">
-          <div class="vault-icon-pill" style="color: #f59e0b;">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-              <path
-                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-          </div>
-          <div class="vault-info">
-            <div class="vault-heading" id="approvalToolTitle">Sensitive Operation</div>
-            <div class="vault-sub" id="approvalReasonText">The agent is about to execute a state-modifying browser action.</div>
-          </div>
-          <span class="vault-badge" style="color: #f59e0b;">⚠️ Confirmation Needed</span>
-        </div>
-        <div class="form-group">
-          <label>Target Action</label>
-          <div id="approvalActionDetails"
-            style="padding: 10px; background: rgba(0,0,0,0.25); border-radius: 6px; font-family: monospace; font-size: 12px; word-break: break-all; color: #e2e8f0;">
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer" style="display: flex; gap: 8px; justify-content: flex-end;">
-        <button id="rejectApprovalBtn" class="btn-secondary"
-          style="padding: 8px 14px; border-radius: 6px; background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.3); cursor: pointer;">Reject Action</button>
-        <button id="confirmApprovalBtn" class="btn-primary"
-          style="padding: 8px 14px; border-radius: 6px; cursor: pointer;">Approve &amp; Execute</button>
-      </div>
-    </div>
-  </div>
-
-  <script src="/gsap.min.js"></script>
-  <script type="module" src="./main.ts"></script>
-</body>
-
+    <script type="module" src="./main.ts"></script>
+  </body>
 </html>

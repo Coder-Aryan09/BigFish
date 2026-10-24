@@ -1,4 +1,5 @@
-// Step 1 checks for the /mcp-ws pipe: extension = MCP server, server = MCP client.
+// Checks for the /mcp-ws pipe (extension = MCP server, server = MCP client)
+// and for login: Google token -> JWT -> one-time ticket -> socket.
 import assert from "node:assert/strict";
 import { after, before, describe, test } from "node:test";
 import { z } from "zod";
@@ -7,57 +8,31 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { CloseCode, ErrorCode, TOOLS, WIRE_VERSION, encodeCtl } from "@bigfish/contracts";
 import { FramedTransport, SocketOpenError, openMcpSocket } from "@bigfish/mcp-ws";
 import { startServer } from "../src/server.js";
+import { issueUserJwt } from "../src/auth/jwt.js";
 import { SessionError } from "../src/mcp/session.js";
-import { DEV_USER_ID } from "../src/ws/mcp-ws.js";
-import { startFakeExtension, type FakeExtensionOptions } from "../scripts/fake-extension.js";
-
-// Short timings so failure paths finish fast.
-const TUNING = { helloTimeoutMs: 300, heartbeatIntervalMs: 100, heartbeatDeadlineMs: 500 };
+import { MAX_DEVICES_PER_USER } from "../src/mcp/registry.js";
+import { DEV_USER_ID } from "../src/routes/dev.routes.js";
+import { withOrigin } from "../scripts/fake-extension.js";
+import { OriginWebSocket, TUNING, USER, auth, jwtFor, testBed, textOf, waitFor } from "./helpers.js";
 
 let srv: Awaited<ReturnType<typeof startServer>>;
-let wsUrl: string;
 let httpUrl: string;
+const { urlFor, fake, session } = testBed(() => srv);
 
 before(async () => {
-  srv = await startServer({ port: 0, host: "127.0.0.1", devRoutes: true, socket: TUNING });
+  srv = await startServer({ port: 0, host: "127.0.0.1", devRoutes: true, socket: TUNING, auth });
   httpUrl = `http://127.0.0.1:${srv.port}`;
-  wsUrl = `ws://127.0.0.1:${srv.port}/mcp-ws`;
 });
 
 after(async () => {
   await srv.close();
 });
 
-function fake(opts: Omit<FakeExtensionOptions, "url"> = {}) {
-  return startFakeExtension({
-    url: wsUrl,
-    heartbeatIntervalMs: TUNING.heartbeatIntervalMs,
-    heartbeatDeadlineMs: TUNING.heartbeatDeadlineMs,
-    ...opts,
-  });
-}
-
-async function waitFor<T>(fn: () => T | undefined, timeoutMs = 2_000): Promise<T> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const value = fn();
-    if (value !== undefined) return value;
-    await new Promise((r) => setTimeout(r, 10));
-  }
-  throw new Error("waitFor timed out");
-}
-
-const session = (deviceId: string) => waitFor(() => srv.registry.get(DEV_USER_ID, deviceId));
-
-function textOf(result: { content: unknown }): string {
-  const blocks = result.content as Array<{ type: string; text?: string }>;
-  return blocks.map((b) => b.text ?? "").join("");
-}
-
 // A raw socket for protocol-level tests. Resolves with the close code.
-function rawSocket(onOpen: (ws: WebSocket) => void): Promise<number> {
+async function rawSocket(onOpen: (ws: WebSocket) => void): Promise<number> {
+  const url = await urlFor();
   return new Promise((resolve) => {
-    const ws = new WebSocket(wsUrl);
+    const ws = new OriginWebSocket(url);
     ws.addEventListener("open", () => onOpen(ws));
     ws.addEventListener("close", (e) => resolve(e.code));
   });
@@ -89,8 +64,9 @@ describe("FramedTransport (in memory)", () => {
 
 describe("/mcp-ws", () => {
   test("browser_ping round trip through the registry", async () => {
-    const ext = await fake();
-    const s = await session(ext.deviceId);
+    // The dev user, so the dev ping route can reach it.
+    const ext = await fake({ userId: DEV_USER_ID });
+    const s = await session(ext.deviceId, DEV_USER_ID);
     assert.deepEqual(
       s.tools.map((t) => t.name),
       TOOLS.map((t) => t.name),
@@ -128,7 +104,7 @@ describe("/mcp-ws", () => {
     const closed = await first.socket.closed;
     assert.equal(closed.code, CloseCode.REPLACED);
     const current = await waitFor(() => {
-      const s = srv.registry.get(DEV_USER_ID, "device-replace-1");
+      const s = srv.registry.get(USER, "device-replace-1");
       return s && s !== firstSession ? s : undefined;
     });
     assert.equal(current.info.connId, second.socket.connId);
@@ -137,7 +113,13 @@ describe("/mcp-ws", () => {
 
   test("unsupported contracts version is refused with 4426", async () => {
     await assert.rejects(
-      openMcpSocket({ url: wsUrl, deviceId: "device-old-1", ext: "0.0.1", contracts: 99 }),
+      openMcpSocket({
+        url: await urlFor(),
+        deviceId: "device-old-1",
+        ext: "0.0.1",
+        contracts: 99,
+        WebSocketImpl: OriginWebSocket,
+      }),
       (err: unknown) => err instanceof SocketOpenError && err.code === CloseCode.UPGRADE_REQUIRED,
     );
   });
@@ -218,5 +200,115 @@ describe("/mcp-ws", () => {
     await assert.rejects(call);
     assert.ok(Date.now() - started < 2_000);
     assert.equal(s.state, "closed");
+  });
+});
+
+describe("login and tickets", () => {
+  const post = (path: string, init: { body?: unknown; jwt?: string } = {}) =>
+    fetch(`${httpUrl}${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(init.jwt ? { authorization: `Bearer ${init.jwt}` } : {}),
+      },
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    });
+
+  // Opens /mcp-ws and reports whether the upgrade succeeded.
+  function tryOpen(url: string, WS: typeof WebSocket = OriginWebSocket): Promise<boolean> {
+    return new Promise((resolve) => {
+      const ws = new WS(url);
+      ws.addEventListener("open", () => {
+        ws.close();
+        resolve(true);
+      });
+      ws.addEventListener("error", () => resolve(false));
+    });
+  }
+
+  test("a valid Google token becomes a BigFish JWT for google:<sub>", async () => {
+    const res = await post("/api/auth/google", { body: { accessToken: "good-alice" } });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.email, "alice@example.com");
+    assert.ok(body.expiresAt > Date.now());
+
+    const devices = await fetch(`${httpUrl}/api/devices`, { headers: { authorization: `Bearer ${body.token}` } });
+    assert.equal(devices.status, 200);
+  });
+
+  test("a bad or missing Google token is refused", async () => {
+    assert.equal((await post("/api/auth/google", { body: { accessToken: "stolen" } })).status, 401);
+    assert.equal((await post("/api/auth/google", { body: {} })).status, 400);
+  });
+
+  test("ws-ticket and devices need a valid JWT", async () => {
+    assert.equal((await post("/api/ws-ticket")).status, 401);
+    assert.equal((await post("/api/ws-ticket", { jwt: "not-a-jwt" })).status, 401);
+    const otherSecret = new TextEncoder().encode("another-secret-another-secret-123");
+    const forged = (await issueUserJwt(otherSecret, { userId: USER, email: "x@example.com" })).token;
+    assert.equal((await post("/api/ws-ticket", { jwt: forged })).status, 401);
+    assert.equal((await fetch(`${httpUrl}/api/devices`)).status, 401);
+  });
+
+  test("/mcp-ws refuses a missing, reused or unknown ticket", async () => {
+    const wsBase = httpUrl.replace(/^http/, "ws");
+    assert.equal(await tryOpen(`${wsBase}/mcp-ws`), false);
+    assert.equal(await tryOpen(`${wsBase}/mcp-ws?ticket=made-up`), false);
+
+    const url = await urlFor();
+    assert.equal(await tryOpen(url), true);
+    assert.equal(await tryOpen(url), false, "a ticket works only once");
+  });
+
+  test("/mcp-ws refuses a wrong Origin", async () => {
+    const url = await urlFor();
+    assert.equal(await tryOpen(url, withOrigin("https://evil.example")), false);
+    assert.equal(await tryOpen(url), false, "the refused attempt does not leave the ticket usable");
+  });
+
+  test("devices are per user: same deviceId, two users, two sessions", async () => {
+    const a = await fake({ userId: "google:a", deviceId: "shared-device-1" });
+    const b = await fake({ userId: "google:b", deviceId: "shared-device-1" });
+    const sa = await session("shared-device-1", "google:a");
+    const sb = await session("shared-device-1", "google:b");
+    assert.notEqual(sa, sb);
+    assert.equal(sa.state, "ready", "user b did not replace user a");
+
+    const res = await fetch(`${httpUrl}/api/devices`, { headers: { authorization: `Bearer ${await jwtFor("google:a")}` } });
+    const body = await res.json();
+    assert.deepEqual(
+      body.devices.map((d: { deviceId: string }) => d.deviceId),
+      ["shared-device-1"],
+    );
+
+    const ping = (userId: string, deviceId: string) =>
+      jwtFor(userId).then((jwt) => post(`/api/devices/${deviceId}/ping`, { jwt }));
+    const pong = await ping("google:a", "shared-device-1");
+    assert.equal(pong.status, 200);
+    assert.match(textOf(await pong.json()), /pong/);
+    assert.equal((await ping("google:c", "shared-device-1")).status, 404, "user c cannot reach a or b's device");
+    a.close();
+    b.close();
+  });
+
+  test(`a user gets at most ${MAX_DEVICES_PER_USER} devices (4008), but a known device may reconnect`, async () => {
+    const userId = "google:many";
+    const exts = [];
+    for (let i = 0; i < MAX_DEVICES_PER_USER; i++) {
+      const ext = await fake({ userId, deviceId: `many-device-${i}` });
+      await session(ext.deviceId, userId);
+      exts.push(ext);
+    }
+
+    await assert.rejects(
+      fake({ userId, deviceId: "many-device-extra" }),
+      (err: unknown) => err instanceof SocketOpenError && err.code === CloseCode.TOO_MANY_DEVICES,
+    );
+
+    const again = await fake({ userId, deviceId: "many-device-0" });
+    assert.equal((await exts[0].socket.closed).code, CloseCode.REPLACED);
+    again.close();
+    for (const ext of exts.slice(1)) ext.close();
   });
 });

@@ -211,7 +211,7 @@ Extension (`apps/extension`):
 - Use the empty files `apps/server/src/routes/agent.routes.ts`, `apps/server/src/controllers/agent.controller.ts` and `apps/server/src/runs.ts` (run registry, AbortController, per-device lock: 409 `RUN_IN_PROGRESS`).
 - Tools: `loadMcpTools(...)` from `@langchain/mcp-adapters` 2.0.1 on `session.client` (it supports an existing client). Wrap calls so they go through `DeviceSession.callTool` (serialize, `_meta`, timeouts, signal).
 - `apps/server/src/agent/tool-policy.ts`: retry rules from 3.5, 15s grace window (registry state `READY | RECONNECTING | GONE`), result wrapping, `SessionError` turned into LLM-readable text.
-- `apps/server/src/agent/graph.ts`: graph from `Docs/Plan.md` (plan, act, verify, finalize), model `claude-sonnet-5-5` via `@langchain/anthropic`, limits 80 tool calls and 8 minutes per run. Disable parallel tool use or rely on the session serializer.
+- `apps/server/src/agent/graph.ts`: graph from `Docs/Plan.md` (plan, act, verify, finalize), model from `AGENT_MODEL` (default `mistral-medium-latest`) via `@langchain/mistralai` with `MISTRAL_API_KEY`, limits 80 tool calls and 8 minutes per run. Disable parallel tool use or rely on the session serializer.
 - Side panel: replace the fake `executeCommand()` in `entrypoints/sidepanel/main.ts` with a real invoke and SSE reader, plus a cancel button.
 
 **Done when:** a prompt from the side panel runs the agent, SSE steps show up, cancel stops the run. Tests: fake extension plus a stubbed model for the run loop, cancel, 409 and the disconnect rules.

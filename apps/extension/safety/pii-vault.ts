@@ -128,9 +128,10 @@ class PiiVault {
   }
 
   private async saveToStorage(): Promise<void> {
-    if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.session) {
+    const session = sessionStorageArea();
+    if (session) {
       try {
-        await chrome.storage.session.set({ bigfish_pii_vault: this.toJSON() });
+        await session.set({ bigfish_pii_vault: this.toJSON() });
       } catch (err) {
         console.warn("[BigFish Vault] storage.session set failed", err);
       }
@@ -138,9 +139,10 @@ class PiiVault {
   }
 
   private async loadFromStorage(): Promise<void> {
-    if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.session) {
+    const session = sessionStorageArea();
+    if (session) {
       try {
-        const data = await chrome.storage.session.get("bigfish_pii_vault");
+        const data = await session.get("bigfish_pii_vault");
         if (data && data.bigfish_pii_vault) {
           this.fromJSON(data.bigfish_pii_vault);
         }
@@ -149,6 +151,11 @@ class PiiVault {
       }
     }
   }
+}
+
+// chrome.storage.session in the extension; absent in unit tests (Node).
+function sessionStorageArea(): { get(key: string): Promise<any>; set(items: object): Promise<void> } | undefined {
+  return (globalThis as any).chrome?.storage?.session;
 }
 
 export const vault = new PiiVault();

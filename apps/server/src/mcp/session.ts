@@ -19,9 +19,13 @@ export interface CallOptions {
   toolCallId?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
+  // Each progress notification restarts timeoutMs (e.g. while the user approves).
+  onProgress?: (progress: { progress: number; total?: number; message?: string }) => void;
 }
 
 export const DEFAULT_TOOL_TIMEOUT_MS = 45_000;
+// Hard cap even while progress keeps arriving.
+export const MAX_TOOL_TIMEOUT_MS = 150_000;
 
 // Connection-level failure. Tool-level failures come back as isError results instead.
 export class SessionError extends Error {
@@ -89,7 +93,13 @@ export class DeviceSession {
       }
       return this.client.callTool(
         { name, arguments: args, _meta: { runId: opts.runId, toolCallId: opts.toolCallId } },
-        { signal: opts.signal, timeout: opts.timeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS },
+        {
+          signal: opts.signal,
+          timeout: opts.timeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
+          resetTimeoutOnProgress: true,
+          maxTotalTimeout: MAX_TOOL_TIMEOUT_MS,
+          onprogress: opts.onProgress,
+        },
       ) as Promise<CallToolResult>;
     });
   }

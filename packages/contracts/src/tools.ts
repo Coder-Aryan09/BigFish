@@ -135,3 +135,6 @@ export const TOOLS: ToolContract[] = [
     annotations: { readOnlyHint: true },
   },
 ];
+
+// Server-side allowlist. Tools an extension reports outside this set never reach the agent.
+export const TOOL_NAMES: ReadonlySet<string> = new Set(TOOLS.map((t) => t.name));

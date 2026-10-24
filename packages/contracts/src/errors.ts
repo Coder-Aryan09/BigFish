@@ -17,6 +17,8 @@ export const ErrorCode = {
   BUSY: "BUSY",
   KILLED: "KILLED",
   INVALID_ARGS: "INVALID_ARGS",
+  UNKNOWN_TOOL: "UNKNOWN_TOOL",
+  STATE_UNKNOWN: "STATE_UNKNOWN",
 } as const;
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
 

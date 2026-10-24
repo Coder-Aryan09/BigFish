@@ -15,3 +15,5 @@ export const bridge = {
     return { ok: false, text: toolError(ErrorCode.NOT_CONNECTED, `Extension not connected, cannot run ${tool}.`, "Open Chrome with BigFish loaded.") };
   },
 };
+
+

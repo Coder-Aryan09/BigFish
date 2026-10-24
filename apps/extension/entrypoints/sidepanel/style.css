@@ -630,9 +630,54 @@ html, body {
   color: var(--text-muted);
 }
 
+.keyboard-tip[data-state="listening"] {
+  color: #dc2626;
+  font-weight: 500;
+}
+
+.keyboard-tip[data-state="error"] {
+  color: #b45309;
+}
+
 .bar-right {
   display: flex;
   align-items: center;
+  gap: 6px;
+}
+
+.btn-mic {
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.btn-mic[hidden] {
+  display: none;
+}
+
+.btn-mic:hover {
+  background: var(--bg-hover);
+  color: var(--text-main);
+}
+
+.btn-mic[data-listening="true"] {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #dc2626;
+  animation: mic-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.35); }
+  50% { box-shadow: 0 0 0 4px rgba(220, 38, 38, 0); }
 }
 
 .btn-submit {
@@ -925,6 +970,7 @@ html, body {
 
 .input-textarea:disabled,
 .btn-submit:disabled,
+.btn-mic:disabled,
 .action-card:disabled {
   opacity: 0.55;
   cursor: not-allowed;

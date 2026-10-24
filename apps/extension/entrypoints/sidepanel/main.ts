@@ -3,6 +3,7 @@ import type { AgentEvent } from "@bigfish/contracts";
 import type { ConnState, ConnStatus } from "../background/conn/connection.js";
 import { startAgentRun, type AgentRun } from "./agent-client.js";
 import type { ApprovalRequest } from "../../safety/approval.js";
+import { setupVoiceInput } from "./voice-input.js";
 
 const CONN_LABELS: Record<ConnState, string> = {
   signed_out: "Signed out",
@@ -91,6 +92,8 @@ interface StatusReply {
 document.addEventListener("DOMContentLoaded", () => {
   const inputEl = document.querySelector<HTMLTextAreaElement>("#cmd-input");
   const submitBtn = document.querySelector<HTMLButtonElement>("#btn-submit");
+  const micBtn = document.querySelector<HTMLButtonElement>("#btn-mic");
+  const inputHint = document.querySelector<HTMLElement>("#input-hint");
   const resetBtn = document.querySelector<HTMLButtonElement>("#btn-reset");
   const welcomeView = document.querySelector<HTMLElement>("#welcome-view");
   const feedView = document.querySelector<HTMLElement>("#feed-view");
@@ -186,6 +189,8 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  const voice = inputEl && micBtn && inputHint ? setupVoiceInput({ input: inputEl, button: micBtn, hint: inputHint }) : null;
+
   // Auto-resize input & handle Enter key
   if (inputEl) {
     inputEl.addEventListener("input", () => {
@@ -198,6 +203,7 @@ document.addEventListener("DOMContentLoaded", () => {
         e.preventDefault();
         const text = inputEl.value.trim();
         if (text) {
+          voice?.cancel();
           void executeCommand(text);
           inputEl.value = "";
           inputEl.style.height = "auto";
@@ -210,6 +216,7 @@ document.addEventListener("DOMContentLoaded", () => {
     submitBtn.addEventListener("click", () => {
       const text = inputEl.value.trim();
       if (text) {
+        voice?.cancel();
         void executeCommand(text);
         inputEl.value = "";
         inputEl.style.height = "auto";
@@ -238,6 +245,8 @@ document.addEventListener("DOMContentLoaded", () => {
       inputEl.placeholder = busy ? "BigFish is working… cancel the run to send another task" : "Ask BigFish what to do on this page... (e.g. click button, summarize, extract)";
     }
     if (submitBtn) submitBtn.disabled = busy;
+    if (micBtn) micBtn.disabled = busy;
+    if (busy) voice?.cancel();
     actionCards.forEach((card) => (card.disabled = busy));
   }
 

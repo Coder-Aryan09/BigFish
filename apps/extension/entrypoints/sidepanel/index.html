@@ -177,10 +177,17 @@
                 <span class="slash">/</span>
                 <span>Commands</span>
               </button>
-              <span class="keyboard-tip">Enter to run</span>
+              <span id="input-hint" class="keyboard-tip" data-state="idle">Enter to run</span>
             </div>
 
             <div class="bar-right">
+              <button id="btn-mic" class="btn-mic" title="Voice input" aria-label="Voice input" aria-pressed="false" data-listening="false">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="9" y="2" width="6" height="12" rx="3"></rect>
+                  <path d="M5 10a7 7 0 0 0 14 0"></path>
+                  <line x1="12" y1="17" x2="12" y2="22"></line>
+                </svg>
+              </button>
               <button id="btn-submit" class="btn-submit" title="Run command (Enter)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                   <line x1="5" y1="12" x2="19" y2="12"></line>

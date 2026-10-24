@@ -27,14 +27,7 @@ export interface Harness {
 
 export async function startHarness(): Promise<Harness> {
   const fixtures = await startFixtureServer();
-  const context = await chromium.launchPersistentContext("", {
-    channel: "chromium",
-    headless: true,
-    args: [`--disable-extensions-except=${EXTENSION_DIR}`, `--load-extension=${EXTENSION_DIR}`],
-  });
-  const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
-  if (process.env.E2E_DEBUG) worker.on("console", (m) => console.log(`[sw] ${m.text()}`));
-  const extensionId = new URL(worker.url()).host;
+  const { context, worker, extensionId } = await launchExtension();
 
   const serverUrl = `http://127.0.0.1:${E2E_SERVER_PORT}`;
   const server = await startBigFishServer(extensionId);
@@ -85,6 +78,18 @@ export async function startHarness(): Promise<Harness> {
     fixtures.server.close();
     throw err;
   }
+}
+
+// Chromium with only the built extension loaded. No server, not signed in.
+export async function launchExtension(extraArgs: string[] = []): Promise<{ context: BrowserContext; worker: Worker; extensionId: string }> {
+  const context = await chromium.launchPersistentContext("", {
+    channel: "chromium",
+    headless: true,
+    args: [`--disable-extensions-except=${EXTENSION_DIR}`, `--load-extension=${EXTENSION_DIR}`, ...extraArgs],
+  });
+  const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
+  if (process.env.E2E_DEBUG) worker.on("console", (m) => console.log(`[sw] ${m.text()}`));
+  return { context, worker, extensionId: new URL(worker.url()).host };
 }
 
 async function startFixtureServer(): Promise<{ server: Server; url: (name: string) => string }> {

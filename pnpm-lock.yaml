@@ -167,6 +167,10 @@ importers:
   .: {}
 
   apps/extension:
+    dependencies:
+      '@bigfish/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
     devDependencies:
       typescript:
         specifier: ^7.0.2
@@ -180,6 +184,9 @@ importers:
       '@bigfish/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@bigfish/mcp-ws':
+        specifier: workspace:*
+        version: link:../../packages/mcp-ws
       '@hono/node-server':
         specifier: 2.1.5
         version: 2.1.5(hono@4.13.13)
@@ -198,6 +205,9 @@ importers:
       '@langchain/mcp-adapters':
         specifier: 2.0.1
         version: 2.0.1(@langchain/core@1.3.0(ws@8.22.0))(@langchain/langgraph@1.5.2(@langchain/core@1.3.0(ws@8.22.0))(zod@4.6.7))
+      '@modelcontextprotocol/client':
+        specifier: 2.3.1
+        version: 2.3.1
       '@modelcontextprotocol/server':
         specifier: 2.4.0
         version: 2.4.0
@@ -229,6 +239,16 @@ importers:
       zod:
         specifier: 4.6.7
         version: 4.6.7
+    devDependencies:
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
+  packages/mcp-ws:
+    dependencies:
+      '@bigfish/contracts':
+        specifier: workspace:*
+        version: link:../contracts
     devDependencies:
       typescript:
         specifier: ^7.0.2

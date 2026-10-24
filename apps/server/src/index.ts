@@ -1,17 +1,19 @@
-// BigFish server: bridge WS, MCP endpoint, and agent runs.
-import { serve } from "@hono/node-server";
-import { Hono } from "hono";
-import { mcpHandler } from "./mcp.js";
-import { bridge } from "./bridge.js";
+// BigFish server entrypoint.
+import { startServer } from "./server.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const HOST = process.env.HOST ?? "127.0.0.1";
 
-const app = new Hono();
-
-app.get("/health", (c) => c.json({ ok: true, name: "bigfish", bridge: bridge.isConnected() }));
-app.all("/mcp", (c) => mcpHandler.fetch(c.req.raw));
-
-serve({ fetch: app.fetch, port: PORT, hostname: HOST }, (info) => {
-  console.log(`[BigFish] server on http://${HOST}:${info.port}`);
+const { port, close } = await startServer({
+  port: PORT,
+  host: HOST,
+  devRoutes: process.env.ENABLE_DEV_ROUTES === "1",
 });
+console.log(`[BigFish] server on http://${HOST}:${port} (extensions dial ws://${HOST}:${port}/mcp-ws)`);
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.once(signal, () => {
+    console.log(`[BigFish] ${signal}, closing`);
+    void close().then(() => process.exit(0));
+  });
+}

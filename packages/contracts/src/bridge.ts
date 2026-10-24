@@ -5,4 +5,7 @@ export type BridgeMessage =
   | { type: "result"; id: string; ok: boolean; text: string; meta?: Record<string, unknown> }
   | { type: "abort"; id?: string; runId?: string }
   | { type: "ping" }
-  | { type: "pong" };
+  | { type: "pong" }
+  | { type: "run_task"; task: string; runId: string }
+  | { type: "cancel_run"; runId: string }
+  | { type: "agent_event"; event: string; data: unknown; runId?: string };

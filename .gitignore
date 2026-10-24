@@ -1,12 +1,49 @@
-.agents
+# Dependencies
 node_modules/
+.pnpm-store/
+
+# Build output
 dist/
 .output/
 .wxt/
+*.tsbuildinfo
+coverage/
+*.zip
+
+# Env and secrets (never commit)
 .env
 .env.*
 !.env.example
+!.env.*.example
+private.pem
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python (ML)
 .venv/
 __pycache__/
 *.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS and editor
 .DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Agent tooling: local skills and runtime state (never commit)
+.agents
+.claude/settings.local.json
+.claude/worktrees/
+agent-guardrails/.state/
+*.claude-init.new

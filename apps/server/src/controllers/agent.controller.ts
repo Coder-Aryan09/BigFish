@@ -22,6 +22,7 @@ export interface AgentDeps {
 }
 
 const MAX_SUBTASK_TOOL_CALLS = 30;
+const ERROR_MESSAGE_LIMIT = 200;
 
 export function agentController(deps: AgentDeps) {
   const limits: AgentLimits = {
@@ -97,7 +98,8 @@ export function agentController(deps: AgentDeps) {
       } catch (err) {
         const event = errorEvent(err, signal);
         emit(event);
-        console.warn(`[BigFish] run ${run.runId} ended: ${event.code} ${event.message}`);
+        const detail = event.code === AgentErrorCode.AGENT_FAILED ? String(err instanceof Error ? err.message : err) : event.message;
+        console.warn(`[BigFish] run ${run.runId} ended: ${event.code} ${detail}`);
       } finally {
         clearTimeout(timer);
         deps.runs.finish(run);
@@ -122,6 +124,9 @@ function errorEvent(err: unknown, signal: AbortSignal): Extract<AgentEvent, { ty
   const reason = signal.aborted ? signal.reason : err;
   if (reason instanceof RunStopped) return { type: "error", code: reason.code, message: reason.message };
   if (err instanceof ToolLimitError) return { type: "error", code: AgentErrorCode.TOOL_LIMIT, message: err.message };
-  const message = err instanceof Error ? err.message : String(err);
+  // Provider errors can carry a whole response body. The UI gets the first
+  // line only; the server log keeps the full error.
+  const raw = err instanceof Error ? err.message : String(err);
+  const message = (raw.split("\n")[0] ?? "").slice(0, ERROR_MESSAGE_LIMIT) || "The agent failed.";
   return { type: "error", code: AgentErrorCode.AGENT_FAILED, message };
 }

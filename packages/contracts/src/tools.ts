@@ -77,7 +77,7 @@ export const TOOLS: ToolContract[] = [
   },
   {
     name: "browser_fill_form",
-    description: "Fill multiple fields in one round trip and submit.",
+    description: "Fill text fields, dropdowns, radios and checkboxes in one call (value \"true\" checks a box), then optionally click submit_ref.",
     input: z.object({
       fields: z.array(z.object({ ref: z.string(), value: z.string() })).max(15),
       submit_ref: z.string().optional(),

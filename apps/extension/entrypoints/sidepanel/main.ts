@@ -95,6 +95,21 @@ document.addEventListener("DOMContentLoaded", () => {
   const micBtn = document.querySelector<HTMLButtonElement>("#btn-mic");
   const inputHint = document.querySelector<HTMLElement>("#input-hint");
   const resetBtn = document.querySelector<HTMLButtonElement>("#btn-reset");
+  const cursorBtn = document.querySelector<HTMLButtonElement>("#btn-cursor");
+
+  // Agent cursor on the page (content script reads the same setting).
+  const CURSOR_KEY = "bigfish.cursor";
+  const renderCursorToggle = (on: boolean) => {
+    if (!cursorBtn) return;
+    cursorBtn.setAttribute("aria-pressed", String(on));
+    cursorBtn.title = `Agent cursor: ${on ? "on" : "off"}`;
+  };
+  void browser.storage.local.get(CURSOR_KEY).then((stored) => renderCursorToggle(stored[CURSOR_KEY] !== false));
+  cursorBtn?.addEventListener("click", () => {
+    const on = cursorBtn.getAttribute("aria-pressed") !== "true";
+    renderCursorToggle(on);
+    void browser.storage.local.set({ [CURSOR_KEY]: on });
+  });
   const welcomeView = document.querySelector<HTMLElement>("#welcome-view");
   const feedView = document.querySelector<HTMLElement>("#feed-view");
   const slashBtn = document.querySelector<HTMLButtonElement>("#btn-quick-command");

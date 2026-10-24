@@ -1,3 +1,5 @@
+import { agentCursor } from "./cursor";
+
 // BigFish Content DOM Engine: element refs, fingerprints, actionability, and the
 // DOM side of every browser tool (scan, text, find, click, type, select, keys,
 // scroll, wait checks, extract).
@@ -193,13 +195,23 @@ export class BigFishDOMEngine {
       else if (el.getAttribute("aria-checked")) entry.checked = el.getAttribute("aria-checked") === "true";
       results.push(entry);
     }
-    return results;
+    if (within) return results;
+    // An open dialog (Gmail compose, a modal form) is where the next action is: list it first,
+    // then what is in view, then the rest of the page.
+    const dialog = this.openDialogElement();
+    const rank = (e: ScannedElement) => (dialog && dialog.contains(this.elementMap.get(e.ref) ?? null) ? 2 : e.inViewport ? 1 : 0);
+    return results.map((e, i) => ({ e, i, r: rank(e) })).sort((a, b) => b.r - a.r || a.i - b.i).map(({ e }) => e);
+  }
+
+  private openDialogElement(): HTMLElement | undefined {
+    const dialogs = Array.from(document.querySelectorAll<HTMLElement>("dialog[open], [role='dialog'], [role='alertdialog'], [aria-modal='true']"));
+    // The last visible one is the one on top.
+    return dialogs.filter((d) => this.isVisible(d)).at(-1);
   }
 
   // Name of an open modal dialog, if any.
   openDialog(): string | undefined {
-    const dialogs = Array.from(document.querySelectorAll<HTMLElement>("dialog[open], [role='dialog'], [role='alertdialog'], [aria-modal='true']"));
-    const visible = dialogs.find((d) => this.isVisible(d));
+    const visible = this.openDialogElement();
     if (!visible) return undefined;
     return this.getAccessibleName(visible).slice(0, 40) || "dialog";
   }
@@ -319,6 +331,8 @@ export class BigFishDOMEngine {
     if (!el) return this.stale(ref);
     const ready = await this.waitActionable(el);
     if (!ready.ok) return { ok: false, error: "NOT_ACTIONABLE", reason: ready.reason, coveringRef: ready.coveringRef };
+    await agentCursor.pointAt(el, "Clicking");
+    await agentCursor.press();
     const opts = { bubbles: true, cancelable: true, view: window };
     el.dispatchEvent(new PointerEvent("pointerdown", opts));
     el.dispatchEvent(new MouseEvent("mousedown", opts));
@@ -338,6 +352,8 @@ export class BigFishDOMEngine {
     const editable = isField ? el : el.isContentEditable ? el : (el.querySelector<HTMLElement>("[contenteditable='true'], textarea, input") ?? null);
     if (!editable) return { ok: false, error: "NOT_EDITABLE", reason: `${this.getRole(el)} is not a text field` };
 
+    await agentCursor.pointAt(editable, "Typing");
+    await agentCursor.press();
     editable.focus();
     if (editable instanceof HTMLInputElement || editable instanceof HTMLTextAreaElement) {
       // The native setter, so React and other frameworks see the change.
@@ -366,12 +382,49 @@ export class BigFishDOMEngine {
     return { ok: true, role: this.getRole(el), name: this.getAccessibleName(el), value: this.valueOf(editable, "textbox") ?? "" };
   }
 
+  // browser_fill_form: one field of any kind. Radios and checkboxes are clicked
+  // (a checkbox only when its state must change), dropdowns are selected, the rest is typed.
+  async fill(ref: string, value: string): Promise<ActionResult> {
+    const el = this.resolve(ref);
+    if (!el) return this.stale(ref);
+    const role = this.getRole(el);
+    const off = /^(false|no|off|0|unchecked)$/i.test(value.trim());
+    if (role === "radio" || role === "checkbox" || role === "switch" || role === "option") {
+      const checked = el instanceof HTMLInputElement ? el.checked : el.getAttribute("aria-checked") === "true" || el.getAttribute("aria-selected") === "true";
+      if (role !== "radio" && checked === !off) return { ok: true, role, name: this.getAccessibleName(el), value: checked ? "[x]" : "[ ]" };
+      if (role === "radio" && checked) return { ok: true, role, name: this.getAccessibleName(el), value: "[x]" };
+      const clicked = await this.click(ref);
+      if (!clicked.ok) return clicked;
+      await sleep(150);
+      const now = el instanceof HTMLInputElement ? el.checked : el.getAttribute("aria-checked") === "true" || el.getAttribute("aria-selected") === "true";
+      return { ok: true, role, name: this.getAccessibleName(el), value: now ? "[x]" : "[ ]" };
+    }
+    if (el instanceof HTMLSelectElement || role === "listbox" || (role === "combobox" && !(el instanceof HTMLInputElement) && !el.isContentEditable)) {
+      const picked = await this.select(ref, value);
+      return picked.ok ? { ...picked, value: String(picked.selected ?? value) } : picked;
+    }
+    return this.type(ref, value, { clear: true });
+  }
+
+  // Visible alert and error texts (e.g. "This is a required question"), for deltas.
+  alerts(): string[] {
+    const nodes = Array.from(document.querySelectorAll<HTMLElement>("[role='alert'], [aria-live='assertive'], .error, [aria-invalid='true'] ~ *"));
+    const texts = nodes
+      .filter((n) => this.isVisible(n))
+      .map((n) => (n.innerText || "").replace(/\s+/g, " ").trim().slice(0, 80))
+      .filter(Boolean);
+    return [...new Set(texts)].slice(0, 5);
+  }
+
   async select(ref: string, option: string): Promise<ActionResult> {
     const el = this.resolve(ref);
     if (!el) return this.stale(ref);
     const want = option.trim().toLowerCase();
 
     if (el instanceof HTMLSelectElement) {
+      el.scrollIntoView({ block: "center", inline: "nearest" });
+      await agentCursor.pointAt(el, `Choosing "${option}"`);
+      await agentCursor.press();
       const options = Array.from(el.options);
       const match =
         options.find((o) => o.textContent?.trim().toLowerCase() === want || o.value.toLowerCase() === want) ??
@@ -404,14 +457,17 @@ export class BigFishDOMEngine {
     return { ok: true, role: this.getRole(el), name: this.getAccessibleName(el), selected: this.getAccessibleName(match) };
   }
 
-  pressKey(key: string, ref?: string): ActionResult {
+  async pressKey(key: string, ref?: string): Promise<ActionResult> {
     let target: HTMLElement | null;
     if (ref) {
       target = this.resolve(ref);
       if (!target) return this.stale(ref);
+      await agentCursor.pointAt(target, `Pressing ${key}`);
       target.focus();
     } else {
       target = (document.activeElement as HTMLElement | null) ?? document.body;
+      if (target !== document.body) await agentCursor.pointAt(target, `Pressing ${key}`);
+      else agentCursor.activity(`Pressing ${key}`);
     }
     const parts = key.split("+").map((p) => p.trim());
     const main = parts.pop() ?? key;
@@ -462,12 +518,15 @@ export class BigFishDOMEngine {
     focusable.at((index + step + focusable.length) % focusable.length)?.focus();
   }
 
-  scroll(direction: "up" | "down", amount: "page" | "half", ref?: string): ActionResult {
+  async scroll(direction: "up" | "down", amount: "page" | "half", ref?: string): Promise<ActionResult> {
     let box: HTMLElement | null = null;
     if (ref) {
       box = this.resolve(ref);
       if (!box) return this.stale(ref);
     }
+    const label = direction === "up" ? "Scrolling ↑" : "Scrolling ↓";
+    if (box) await agentCursor.pointAt(box, label);
+    else await agentCursor.moveTo(window.innerWidth - 40, window.innerHeight / 2, label);
     const height = box ? box.clientHeight : window.innerHeight;
     const delta = (direction === "up" ? -1 : 1) * Math.round(height * (amount === "half" ? 0.5 : 0.85));
     const before = box ? box.scrollTop : window.scrollY;
@@ -495,15 +554,20 @@ export class BigFishDOMEngine {
       }
       return hits;
     }
+    // Whole-word matches only, so "to" finds "To recipients" but not "Skip to content" first.
     const words = q.split(/\W+/).filter(Boolean);
     return this.scan()
       .map((e) => {
         const name = e.name.toLowerCase();
-        let score = name === q ? 10 : name.includes(q) ? 5 : 0;
+        const nameWords = name.split(/\W+/).filter(Boolean);
+        let score = name === q ? 20 : name.startsWith(q) ? 8 : 0;
         for (const w of words) {
-          if (name.includes(w)) score += 2;
-          if (e.role === w) score += 1;
+          if (nameWords.includes(w)) score += 3;
+          else if (w.length >= 4 && name.includes(w)) score += 1;
+          if (e.role === w || (w === "field" && (e.role === "textbox" || e.role === "combobox"))) score += 2;
         }
+        // A short name that matches is more likely the label itself.
+        if (score > 0) score += Math.max(0, 3 - Math.floor(nameWords.length / 3));
         return { e, score };
       })
       .filter((x) => x.score > 0)

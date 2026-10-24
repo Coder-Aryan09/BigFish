@@ -305,6 +305,23 @@ describe("agent run", () => {
     await closeExt(ext);
   });
 
+  test("an empty model reply is not sent back to the model", async () => {
+    script = {
+      act: (messages, turn) => {
+        if (turn === 0) return new AIMessage({ content: "" });
+        const empty = messages.some((m) => AIMessage.isInstance(m) && !m.tool_calls?.length && !String(m.content).trim());
+        assert.equal(empty, false, "no empty assistant turn in the history");
+        return complete();
+      },
+    };
+    const ext = await fake({ handlers: pageHandlers });
+    await session(ext.deviceId);
+
+    const events = await readEvents(await invoke(ext.deviceId));
+    assert.equal(typesOf(events).at(-1), "final");
+    await closeExt(ext);
+  });
+
   test("only one browser action runs per model turn", async () => {
     const clicked: string[] = [];
     script = {

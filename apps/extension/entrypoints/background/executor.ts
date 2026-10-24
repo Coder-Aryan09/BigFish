@@ -287,12 +287,13 @@ export class BrowserToolExecutor {
     const before = await this.scanQuiet(tab.id);
     const lines: string[] = [];
     for (const field of real) {
-      const resp = await tabCall<{ role: string; name: string; value: string }>(tab.id, "BIGFISH_TYPE", { ref: field.ref, text: field.value, clear: true });
+      const resp = await tabCall<{ role: string; name: string; value: string }>(tab.id, "BIGFISH_FILL", { ref: field.ref, value: field.value });
       if (!resp.ok) {
         const err = contentError(resp, field.ref);
         return { ok: false, text: `${err.text}\nFilled before the failure:\n${lines.join("\n") || "(none)"}`, origin };
       }
-      lines.push(`${field.ref} ${resp.role} "${resp.name}" ="${String(resp.value ?? "").slice(0, 60)}"`);
+      const value = String(resp.value ?? "");
+      lines.push(`${field.ref} ${resp.role} "${resp.name}" ${/^\[[x ]\]$/.test(value) ? value : `="${value.slice(0, 60)}"`}`);
     }
     let action = `filled ${lines.length} fields`;
     if (args.submit_ref) {
@@ -370,7 +371,11 @@ export class BrowserToolExecutor {
         const resp = await tabCall<{ quiet: boolean }>(tab.id, "BIGFISH_WAIT_QUIET", { quietMs: IDLE_QUIET_MS, timeoutMs: slice }).catch(() => null);
         quiet = Boolean(resp?.ok && resp.quiet);
       }
-      if (!quiet) fail(ErrorCode.TIMEOUT, "The page kept changing until the timeout.", "Read it now with browser_snapshot, or wait again.");
+      // Some apps (Gmail, dashboards) never go fully quiet. Not an error: report it and go on.
+      if (!quiet && !conds.text && !conds.gone_text && !conds.ref && !args.url_contains) {
+        const now = await browser.tabs.get(tab.id).catch(() => null);
+        return { ok: true, text: `ok waited, page still changing a little | ${now?.title ?? ""}`, origin: safeOrigin(now?.url) };
+      }
     }
 
     for (;;) {

@@ -443,6 +443,7 @@ html, body {
 
 .user-prompt-card {
   align-self: flex-end;
+  overflow-wrap: anywhere;
   background-color: #ffffff;
   border: 1px solid #cbd5e1;
   border-radius: var(--radius-md) var(--radius-md) 2px var(--radius-md);
@@ -455,6 +456,7 @@ html, body {
 }
 
 .agent-result-card {
+  min-width: 0;
   background-color: #ffffff;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -493,6 +495,7 @@ html, body {
   font-size: 12px;
   color: var(--text-secondary);
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .result-body strong {
@@ -773,7 +776,7 @@ html, body {
 .run-log-item {
   padding-left: 14px;
   position: relative;
-  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .run-log-item::before {
@@ -966,6 +969,9 @@ html, body {
 
 .run-answer-box.error .run-answer {
   color: #b91c1c;
+  white-space: pre-wrap;
+  max-height: 160px;
+  overflow-y: auto;
 }
 
 .input-textarea:disabled,
@@ -974,4 +980,10 @@ html, body {
 .action-card:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+/* Agent cursor toggle */
+.btn-cursor[aria-pressed="true"] {
+  color: var(--primary);
+  background-color: var(--primary-light);
 }

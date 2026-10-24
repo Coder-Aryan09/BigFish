@@ -9,6 +9,7 @@ export interface ScanResult {
   scrollY: number;
   scrollHeight: number;
   dialog?: string;
+  alerts?: string[];
 }
 
 const DELTA_NEW_LIMIT = 5;
@@ -89,7 +90,19 @@ export function buildDelta(action: string, before: ScanResult | null, after: Sca
       parts.push(`+${added.length} new: ${shown.join(", ")}${added.length > DELTA_NEW_LIMIT ? ", …" : ""}`);
     }
     if (gone) parts.push(`-${gone} gone`);
-    if (!added.length && !gone && before.dialog === after.dialog) parts.push("no visible change");
+    // Same element, new state: a checked radio, a changed value.
+    const was = new Map(before.elements.map((e) => [e.ref, e]));
+    const changed = after.elements.filter((e) => {
+      const old = was.get(e.ref);
+      return old && (old.checked !== e.checked || old.value !== e.value);
+    });
+    if (changed.length) {
+      parts.push(`changed: ${changed.slice(0, DELTA_NEW_LIMIT).map((e) => elementLine(e)).join(", ")}${changed.length > DELTA_NEW_LIMIT ? ", …" : ""}`);
+    }
+    const oldAlerts = new Set(before.alerts ?? []);
+    const newAlerts = (after.alerts ?? []).filter((a) => !oldAlerts.has(a));
+    if (newAlerts.length) parts.push(`alert: ${newAlerts.map((a) => `"${a}"`).join(", ")}`);
+    if (!added.length && !gone && !changed.length && !newAlerts.length && before.dialog === after.dialog) parts.push("no visible change");
   }
   return parts.join(" | ");
 }

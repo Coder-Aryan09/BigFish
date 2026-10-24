@@ -67,8 +67,10 @@ export async function runSubtask(ctx: AgentRunContext, subtaskId: number, input:
   for (;;) {
     ctx.signal.throwIfAborted();
     const reply = await model.invoke(clearOldResults(messages), { signal: ctx.signal });
-    messages.push(reply);
     const calls = reply.tool_calls ?? [];
+    // Mistral rejects an assistant message with no text and no tool calls,
+    // so an empty reply is dropped instead of kept in the history.
+    if (calls.length > 0 || textOf(reply).trim()) messages.push(reply);
 
     if (calls.length === 0) {
       if (nudges++ >= MAX_NUDGES) {

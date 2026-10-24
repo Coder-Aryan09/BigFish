@@ -139,3 +139,36 @@ test("wait_for gives up with TIMEOUT", async () => {
   const waited = await h.callTool("browser_wait_for", { text: "never shows up", timeout_ms: 500 });
   expect(waited.text).toMatch(/^ERROR TIMEOUT/);
 });
+
+test("the agent cursor and control frame show on the page during an action", async () => {
+  const snap = await openForm();
+  const call = h.callTool("browser_click", { ref: refOf(snap, 'button "Save draft"') });
+  // Mid-move: the overlay is on the page while the click happens.
+  await expect(h.page.locator("bigfish-agent-cursor")).toHaveCount(1);
+  await h.page.waitForTimeout(250);
+  await h.page.screenshot({ path: "test-results/agent-cursor.png" });
+  expect((await call).ok).toBe(true);
+  await expect(h.page.locator("#status")).toHaveText("Draft saved");
+});
+
+test("fill_form handles text, ARIA radios and checkboxes; a missing field shows up as an alert", async () => {
+  await h.callTool("browser_navigate", { url: h.fixtureUrl("survey.html") });
+  const snap = (await h.callTool("browser_snapshot", {})).text;
+  expect(snap).toMatch(/radio "2022" \[ \]/);
+
+  const early = await h.callTool("browser_click", { ref: refOf(snap, 'button "Submit"') });
+  expect(early.text).toContain('alert: "This is a required question"');
+
+  const filled = await h.callTool("browser_fill_form", {
+    fields: [
+      { ref: refOf(snap, "What's your name"), value: "Asha" },
+      { ref: refOf(snap, 'radio "2022"'), value: "true" },
+      { ref: refOf(snap, 'checkbox "Send me updates"'), value: "true" },
+    ],
+    submit_ref: refOf(snap, 'button "Submit"'),
+  });
+  expect(filled.ok, filled.text).toBe(true);
+  expect(filled.text).toMatch(/radio "2022" \[x\]/);
+  expect(filled.text).toMatch(/checkbox "Send me updates" \[x\]/);
+  await expect(h.page.locator("#done")).toBeVisible();
+});

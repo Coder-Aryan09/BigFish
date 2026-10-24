@@ -2,6 +2,10 @@
 // Every message is { type, payload, ctx: { slot, idBase } }, and every answer
 // carries nextId so the worker can keep refs unique across page loads.
 import { bigFishDOM, type RefContext } from "./dom-actions";
+import { agentCursor } from "./cursor";
+
+// Messages that only read the page still show the agent is active here.
+const READING = new Set(["BIGFISH_SCAN", "BIGFISH_TEXT", "BIGFISH_FIND", "BIGFISH_EXTRACT", "BIGFISH_CHECK", "BIGFISH_WAIT_QUIET"]);
 
 type Message = { type: string; payload?: any; ctx?: RefContext };
 
@@ -12,6 +16,7 @@ export default defineContentScript({
     browser.runtime.onMessage.addListener((message: Message, _sender, sendResponse) => {
       if (!message || typeof message !== "object" || !message.type?.startsWith("BIGFISH_")) return false;
       bigFishDOM.useContext(message.ctx);
+      if (READING.has(message.type)) agentCursor.activity(message.type === "BIGFISH_WAIT_QUIET" ? "BigFish is waiting for the page" : "BigFish is reading the page");
       handle(message)
         .then((answer) => sendResponse({ ...answer, nextId: bigFishDOM.nextFreeId }))
         .catch((err) => sendResponse({ ok: false, error: "PAGE_UNRESPONSIVE", reason: err instanceof Error ? err.message : String(err) }));
@@ -42,6 +47,7 @@ async function handle({ type, payload = {} }: Message): Promise<Record<string, u
           scrollY: Math.round(window.scrollY),
           scrollHeight: document.documentElement.scrollHeight,
           dialog: bigFishDOM.openDialog(),
+          alerts: bigFishDOM.alerts(),
         };
 
       case "BIGFISH_TEXT":
@@ -65,6 +71,9 @@ async function handle({ type, payload = {} }: Message): Promise<Record<string, u
 
       case "BIGFISH_TYPE":
         return bigFishDOM.type(payload.ref, String(payload.text ?? ""), { clear: payload.clear, submit: payload.submit });
+
+      case "BIGFISH_FILL":
+        return bigFishDOM.fill(payload.ref, String(payload.value ?? ""));
 
       case "BIGFISH_SELECT":
         return bigFishDOM.select(payload.ref, String(payload.option ?? ""));

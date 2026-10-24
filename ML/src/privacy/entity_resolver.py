@@ -19,7 +19,7 @@ Important:
     - Keeps ambiguous detections separate.
 """
 
-#             cd Pratyaksha 
+#             cd BigFish 
 #             $env:USE_TF = "0"
 #             python -m ML.src.privacy.entity_resolver
 
@@ -143,12 +143,15 @@ class EntityResolver:
         if not isinstance(span, dict):
             return None
 
-        start = span.get("start", span.get("start_char"))
-        end = span.get("end", span.get("end_char"))
+        start_val = span.get("start", span.get("start_char"))
+        end_val = span.get("end", span.get("end_char"))
+
+        if start_val is None or end_val is None:
+            return None
 
         try:
-            start = int(start)
-            end = int(end)
+            start = int(start_val)
+            end = int(end_val)
         except (TypeError, ValueError):
             return None
 
@@ -286,9 +289,10 @@ class EntityResolver:
                 record.get("conf"),
             )
 
-        if record.get("confidence") is not None:
+        conf_raw = record.get("confidence")
+        if conf_raw is not None:
             try:
-                confidence = float(record["confidence"])
+                confidence = float(conf_raw)
                 record["confidence"] = (
                     confidence
                     if 0.0 <= confidence <= 1.0

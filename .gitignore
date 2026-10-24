@@ -29,6 +29,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+*.pt
+sample_id.png
+temp_*.png
 
 # Logs
 *.log

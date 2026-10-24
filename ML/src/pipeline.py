@@ -26,13 +26,12 @@ Expected output from each detector:
 Adapt the detector adapters if your existing modules use different APIs.
 """
 
-#             cd Pratyaksha 
+#             cd BigFish 
 #             $env:USE_TF = "0"
 #             python -m ML.src.pipeline
 
 
 from __future__ import annotations
-from unittest import result 
 
 from ML.src.workers.cv import CVDetector as cvdect
 from ML.src.workers.ner import NERDetector as nerdect
@@ -105,8 +104,11 @@ class DetectionPipeline:
         if is_dataclass(item) and not isinstance(item, type):
             return asdict(item)
 
-        if hasattr(item, "model_dump") and callable(item.model_dump):
-            return item.model_dump()
+        model_dump = getattr(item, "model_dump", None)
+        if callable(model_dump):
+            res = model_dump()
+            if isinstance(res, dict):
+                return res
 
         raise TypeError(
             f"Unsupported detection type: {type(item).__name__}. "
@@ -350,7 +352,18 @@ def main():
         strict=True,
     )
 
-    image_path = r"D:\Honey\Fun\Pratyaksh\Pratyaksha\APAAR ID Kushagra.png"
+    from pathlib import Path
+    from PIL import Image, ImageDraw
+
+    image_path = Path("sample_id.png")
+    if not image_path.exists():
+        img = Image.new("RGB", (600, 300), color=(255, 255, 255))
+        d = ImageDraw.Draw(img)
+        d.text((30, 30), "BigFish Privacy Vision Pipeline", fill=(0, 0, 0))
+        d.text((30, 80), "Name: John Doe", fill=(0, 0, 0))
+        d.text((30, 130), "Company: Acme Corp", fill=(0, 0, 0))
+        d.text((30, 180), "Location: New Delhi", fill=(0, 0, 0))
+        img.save(image_path)
 
     result = pipeline.run(image_path)
 
@@ -373,15 +386,14 @@ def main():
 
     for source, detections in result["by_source"].items():
         print(f"\n{source.upper()}: {len(detections)} detections")
-
-    for detection in detections:
-        # Avoid printing raw text from real identity documents.
-        safe_record = {
-            key: value
-            for key, value in detection.items()
-            if key not in {"text"}
-        }
-        print(safe_record)
+        for detection in detections:
+            # Avoid printing raw text from real identity documents.
+            safe_record = {
+                key: value
+                for key, value in detection.items()
+                if key not in {"text"}
+            }
+            print(safe_record)
 
     print("Detection pipeline completed.")
     print("Detection count:", len(result["detections"]))

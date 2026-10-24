@@ -1,4 +1,5 @@
 // BigFish Simplified Entry Controller
+declare const chrome: any;
 
 document.addEventListener("DOMContentLoaded", () => {
   const inputEl = document.querySelector<HTMLTextAreaElement>("#cmd-input");
@@ -13,7 +14,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Detect active tab title if running inside Chrome extension
   if (typeof chrome !== "undefined" && chrome.tabs && chrome.tabs.query) {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs: any[]) => {
       if (tabs && tabs[0] && tabs[0].title && activeTabTitle) {
         activeTabTitle.textContent = tabs[0].title;
       }

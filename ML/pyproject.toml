@@ -1,7 +1,7 @@
 [project]
-name = "ml"
+name = "bigfish-ml"
 version = "0.1.0"
-description = "Add your description here"
+description = "BigFish ML: OCR, NER and detection experiments (roadmap)"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = []

@@ -1,0 +1,13 @@
+{
+  "name": "bigfish",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.15.0",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev:server": "pnpm --filter @bigfish/server dev",
+    "dev:ext": "pnpm --filter @bigfish/extension dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck"
+  }
+}

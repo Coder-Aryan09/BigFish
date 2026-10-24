@@ -1,0 +1,12 @@
+.agents
+node_modules/
+dist/
+.output/
+.wxt/
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.pyc
+.DS_Store

@@ -1,0 +1,14 @@
+# Codex CLI project settings for this repo. Managed by claude-init.
+# The full rules are in AGENTS.md, which Codex reads automatically.
+#
+# workspace-write keeps Codex inside this folder (no network).
+# "on-request" lets Codex run normal commands and ask only for sensitive ones, as listed in AGENTS.md rule 2.
+# Codex has no hook, so the command list in AGENTS.md rule 2 relies on the agent.
+#
+# Check these keys against your installed Codex version (`codex --help`,
+# Codex docs): project-level .codex/config.toml needs a trusted project.
+sandbox_mode = "workspace-write"
+approval_policy = "on-request"
+
+[sandbox_workspace_write]
+network_access = false

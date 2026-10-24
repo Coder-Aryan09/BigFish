@@ -1,0 +1,9 @@
+{
+  "approvalMode": "sensitive",
+  "planGate": true,
+  "secretPaths": [],
+  "testsDeleteDb": false,
+  "testsDeleteDbMessage": "test suites here delete data in the configured database. Run tests yourself",
+  "testRunnerPattern": "",
+  "extraSecretEnvVars": []
+}

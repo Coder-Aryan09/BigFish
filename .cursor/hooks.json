@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeSubmitPrompt": [
+      {
+        "command": "node .cursor/hooks/guard.mjs"
+      }
+    ],
+    "beforeShellExecution": [
+      {
+        "command": "node .cursor/hooks/guard.mjs"
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": "node .cursor/hooks/guard.mjs"
+      }
+    ],
+    "beforeReadFile": [
+      {
+        "command": "node .cursor/hooks/guard.mjs"
+      }
+    ]
+  }
+}

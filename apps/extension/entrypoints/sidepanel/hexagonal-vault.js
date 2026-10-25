@@ -182,22 +182,21 @@ void main() {
 
   float mouseLight = max(cursorLight, trailLight);
 
-  // Autonomous radiant waves expanding from center outward to ends when mouse leaves
+  // Subtle, calm ambient wave expanding gently from center outward when mouse leaves
   float normDistCenter = distCenter / max(maxDim, 1.0);
-  float wavePhase = normDistCenter * 9.0 - uTime * 2.2 * uSpeed;
+  float wavePhase = normDistCenter * 4.5 - uTime * 0.9 * uSpeed;
   float centerPulse = sin(wavePhase) * 0.5 + 0.5;
-  centerPulse = smoothstep(0.2, 0.85, centerPulse);
+  centerPulse = smoothstep(0.35, 0.9, centerPulse);
 
-  float wavePhase2 = normDistCenter * 14.0 - uTime * 3.4 * uSpeed;
-  float centerPulse2 = (sin(wavePhase2) * 0.5 + 0.5) * 0.35;
+  // Very gentle and subtle wave illumination (calm, never overwhelming)
+  float centerWaveLight = centerPulse * exp(-normDistCenter * 1.6) * 0.18;
+  float centerGlow = exp(-normDistCenter * 3.0) * 0.08;
+  centerWaveLight = clamp(centerWaveLight + centerGlow, 0.0, 0.22);
 
-  float radialBloom = exp(-normDistCenter * 1.5) * 0.75;
-  float centerWaveLight = clamp((centerPulse * 0.65 + centerPulse2) * exp(-normDistCenter * 0.75) + radialBloom * 0.35, 0.0, 1.0);
-
-  // Smooth blend between active cursor follow and center-to-edge wave
+  // Smooth blend between active cursor follow and gentle ambient center wave
   float activeFactor = clamp(uMouseActive, 0.0, 1.0);
   float totalLight = mix(centerWaveLight, mouseLight, activeFactor);
-  minLightDist = mix(distCenter * 0.65, minLightDist, activeFactor);
+  minLightDist = mix(distCenter, minLightDist, activeFactor);
 
   // Flow ripple modulation along hex lines
   float wave = sin(minLightDist * 0.055 / uDpr - uTime * 3.2 * uSpeed) * 0.5 + 0.5;

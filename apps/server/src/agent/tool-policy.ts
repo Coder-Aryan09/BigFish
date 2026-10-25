@@ -28,6 +28,8 @@ export interface BrowserToolResult {
   ok: boolean;
   // What the model sees.
   text: string;
+  // A masked screenshot (browser_screenshot). The extension already replaced private data with tokens.
+  image?: { data: string; mimeType: string };
 }
 
 export function isReadOnlyTool(name: string): boolean {
@@ -88,11 +90,17 @@ function connectionLost(session: DeviceSession): boolean {
 
 function toResult(result: CallToolResult): BrowserToolResult {
   const text = result.content
+    .filter((block) => block.type !== "image")
     .map((block) => (block.type === "text" ? block.text : `[${block.type}]`))
     .join("\n");
   if (result.isError) return { ok: false, text };
+  const image = result.content.find((block) => block.type === "image");
   // Page content is data for the model, never instructions.
-  return { ok: true, text: `<page untrusted>\n${text}\n</page>` };
+  return {
+    ok: true,
+    text: `<page untrusted>\n${text}\n</page>`,
+    ...(image?.type === "image" ? { image: { data: image.data, mimeType: image.mimeType } } : {}),
+  };
 }
 
 function fail(code: ErrorCode, message: string, hint?: string): BrowserToolResult {

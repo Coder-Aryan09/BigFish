@@ -28,7 +28,11 @@ export function buildMcpServer(): McpServer {
                   .notify({ method: "notifications/progress", params: { progressToken, progress: ++step, message } })
                   .catch(() => {});
         const res = await executor.execute(tool.name, args, "mcp", { signal: ctx.mcpReq.signal, runId: meta?.runId, onProgress });
-        return { content: [{ type: "text" as const, text: res.text }], isError: !res.ok };
+        const content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] = [
+          { type: "text", text: res.text },
+        ];
+        if (res.image) content.push({ type: "image", data: res.image.data, mimeType: res.image.mimeType });
+        return { content, isError: !res.ok };
       },
     );
   }

@@ -36,6 +36,7 @@ from __future__ import annotations
 from ML.src.workers.cv import CVDetector as cvdect
 from ML.src.workers.ner import NERDetector as nerdect
 from ML.src.workers.ocr import OCRDetector as ocrdect 
+from ML.src.workers.pii_regex import PIIRegexDetector
 
 import logging
 from dataclasses import asdict, is_dataclass
@@ -57,6 +58,7 @@ class DetectionPipeline:
         cv_detector: cvdect,
         ner_detector: nerdect,
         *,
+        pii_detector: Optional[PIIRegexDetector] = None,
         strict: bool = True,
     ) -> None:
         """
@@ -64,6 +66,8 @@ class DetectionPipeline:
             ocr_detector: OCR object or callable.
             cv_detector: CV object or callable.
             ner_detector: NER object or callable.
+            pii_detector: Pattern detector for emails, phones and ID
+                    numbers. Defaults to PIIRegexDetector.
             strict: If True, raise an error when a stage fails.
                     If False, record the failure and continue.
 
@@ -75,6 +79,7 @@ class DetectionPipeline:
         self.ocr_detector = ocr_detector
         self.cv_detector = cv_detector
         self.ner_detector = ner_detector
+        self.pii_detector = pii_detector or PIIRegexDetector()
         self.strict = strict
 
     @staticmethod
@@ -259,11 +264,13 @@ class DetectionPipeline:
         )
 
         
-        # Stage 3: NER
+        # Stage 3: NER and regex PII
         # Each OCR text fragment gets one stable context ID.
-        # NER detections inherit the ID of the text they came from.
+        # NER and regex detections inherit the ID of the text they came from.
         ner_detections: list[dict[str, Any]] = []
         ner_errors: list[str] = []
+        regex_detections: list[dict[str, Any]] = []
+        regex_errors: list[str] = []
 
         text_sources: list[tuple[str, str]] = []
 
@@ -297,6 +304,19 @@ class DetectionPipeline:
             if error:
                 ner_errors.append(f"{context_id}: {error}")
 
+            results, error = self._run_stage(
+                "regex",
+                self.pii_detector,
+                text,
+            )
+
+            for record in results:
+                record["context_id"] = context_id
+                regex_detections.append(record)
+
+            if error:
+                regex_errors.append(f"{context_id}: {error}")
+
 
         # Stage 4: Attach optional DOM detections.
         normalized_dom = self._normalize(dom_detections or [], "dom")
@@ -306,6 +326,7 @@ class DetectionPipeline:
             ocr_detections
             + cv_detections
             + ner_detections
+            + regex_detections
             + normalized_dom
         )
 
@@ -320,6 +341,9 @@ class DetectionPipeline:
         if ner_errors:
             stage_errors["ner"] = ner_errors
 
+        if regex_errors:
+            stage_errors["regex"] = regex_errors
+
         # A failure means the output is not cleared for downstream use.
         ready_for_privacy_processing = not stage_errors
         
@@ -329,6 +353,7 @@ class DetectionPipeline:
                 "ocr": ocr_detections,
                 "cv": cv_detections,
                 "ner": ner_detections,
+                "regex": regex_detections,
                 "dom": normalized_dom,
             },
             "ocr_text": self._extract_ocr_text(ocr_detections),

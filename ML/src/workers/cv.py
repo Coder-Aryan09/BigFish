@@ -10,7 +10,7 @@ import numpy as np
 from PIL import Image
 from ultralytics import YOLO
 
-from schema import Detection
+from ML.src.schema import Detection
 
 DEFAULT_MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "yolo26s.pt"
 

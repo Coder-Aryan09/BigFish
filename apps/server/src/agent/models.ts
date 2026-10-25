@@ -38,6 +38,8 @@ export interface AgentModels {
   act(tools: StructuredToolInterface[]): ActModel;
   judge(input: string, signal: AbortSignal): Promise<Verdict>;
   finalize(input: string, signal: AbortSignal): Promise<string>;
+  // false hides browser_screenshot, for a model that cannot read images.
+  vision?: boolean;
 }
 
 export interface ModelConfig {
@@ -45,6 +47,7 @@ export interface ModelConfig {
   apiKey: string;
   model: string;
   judgeModel: string;
+  vision: boolean;
 }
 
 // OpenAI-compatible endpoints.
@@ -62,6 +65,12 @@ const isSet = (value: string | undefined): value is string => !!value && value !
 // The first provider with a key wins: NVIDIA, then OpenRouter, then Mistral.
 // Undefined when no key is set: the agent routes answer 503.
 export function modelConfigFromEnv(env: NodeJS.ProcessEnv): ModelConfig | undefined {
+  const config = providerFromEnv(env);
+  // The default models read images. AGENT_VISION=false is for a text-only model.
+  return config && { ...config, vision: env.AGENT_VISION !== "false" };
+}
+
+function providerFromEnv(env: NodeJS.ProcessEnv): Omit<ModelConfig, "vision"> | undefined {
   if (isSet(env.NVIDIA_API_KEY)) {
     return {
       provider: "nvidia",
@@ -115,6 +124,7 @@ export function agentModels(config: ModelConfig): AgentModels {
       return { invoke: (messages, { signal }) => bound.invoke(messages, { signal }) };
     },
     judge: (input, signal) => judge.invoke([new SystemMessage(JUDGE_PROMPT), new HumanMessage(input)], { signal }),
+    vision: config.vision,
     finalize: async (input, signal) => {
       const reply = await main.invoke([new SystemMessage(FINALIZE_PROMPT), new HumanMessage(input)], { signal });
       return typeof reply.content === "string" ? reply.content : reply.text;

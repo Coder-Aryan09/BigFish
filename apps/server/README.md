@@ -36,7 +36,7 @@ The **BigFish Backend Server** (`@bigfish/server`) orchestrates autonomous brows
 | Caller | Call type | Why it calls this service |
 |---|---|---|
 | BigFish Chrome Extension Sidepanel | Sync HTTP / SSE (`/api/agent/invoke`) | Starts agent runs and receives live streaming `AgentEvent` traces |
-| BigFish Chrome Extension Background | Framed WebSocket (`/mcp-ws`) | Connects as an MCP Server exposing 13 browser automation tools |
+| BigFish Chrome Extension Background | Framed WebSocket (`/mcp-ws`) | Connects as an MCP Server exposing 15 browser automation tools |
 | Browser Client Authentication | Sync REST (`/api/auth/google`, `/api/ws-ticket`) | Exchanges Google OAuth tokens for BigFish JWTs and one-time WS connection tickets |
 
 ---
@@ -113,6 +113,7 @@ apps/server/
 | `MISTRAL_API_KEY` | One model key ✅ | Mistral key. Used when no NVIDIA or OpenRouter key is set. With no model key, `/api/agent/invoke` answers 503 | `mstrl_sample_api_key_xxxxxxxx` |
 | `AGENT_MODEL` | ❌ | Mistral agent model (must support tool calling) | `mistral-medium-latest` |
 | `AGENT_JUDGE_MODEL` | ❌ | Mistral judge model | `mistral-small-latest` |
+| `AGENT_VISION` | ❌ | `false` hides `browser_screenshot` from a model that cannot read images | `true` |
 | `GOOGLE_EXTENSION_CLIENT_ID`| ✅ | Chrome Extension OAuth Client ID | `123456789-sample.apps.googleusercontent.com` |
 | `JWT_SECRET` | ✅ | Symmetric secret for signing BigFish access JWTs | `super-secret-random-jwt-key-32chars` |
 | `EXTENSION_ID` | ✅ | Chrome Extension ID to enforce WebSocket Origin check | `abcdefghijklmnopabcdefghijklmnop` |
@@ -149,8 +150,10 @@ pnpm --filter @bigfish/server typecheck
 - `POST /api/agent/cancel` — Body: `{ runId: string }` $\to$ Returns `{ ok: true }`
 
 ### Outbound Tool RPC (Over Extension MCP WebSocket)
-Dispatches any of the 13 verified browser tool contracts defined in `@bigfish/contracts`:
-`browser_navigate`, `browser_snapshot`, `browser_find`, `browser_click`, `browser_type`, `browser_fill_form`, `browser_select`, `browser_press_key`, `browser_scroll`, `browser_wait_for`, `browser_extract`, `browser_tabs`, `browser_ping`.
+Dispatches any of the 15 verified browser tool contracts defined in `@bigfish/contracts`:
+`browser_navigate`, `browser_snapshot`, `browser_find`, `browser_click`, `browser_type`, `browser_fill_form`, `browser_select`, `browser_press_key`, `browser_scroll`, `browser_wait_for`, `browser_extract`, `browser_screenshot`, `browser_code_editor`, `browser_tabs`, `browser_ping`.
+
+A `browser_screenshot` image is passed to the model as a user message right after the tool answers (OpenAI-compatible APIs take images only there). Only the newest screenshot stays in the context.
 
 ---
 

@@ -1,4 +1,4 @@
-// BigFish MCP tool contracts (zod v4). The 12 browser tools are defined here.
+// BigFish MCP tool contracts (zod v4). The 15 browser tools are defined here.
 import { z } from "zod";
 
 export interface ToolContract {
@@ -126,6 +126,15 @@ export const TOOLS: ToolContract[] = [
     annotations: { readOnlyHint: true },
   },
   {
+    name: "browser_screenshot",
+    description:
+      "Screenshot of the visible part of the page, with private data replaced by tokens like [NAME_1A2B]. Use only when the snapshot is not enough: images, canvas, charts, layout.",
+    input: z.object({
+      tab: z.number().optional().describe("Tab slot from browser_tabs. Omit for the active tab."),
+    }),
+    annotations: { readOnlyHint: true },
+  },
+  {
     name: "browser_extract",
     description: "Pull links, tables, or fields as structured text.",
     input: z.object({
@@ -135,6 +144,18 @@ export const TOOLS: ToolContract[] = [
       max: z.number().optional().default(25),
     }),
     annotations: { readOnlyHint: true },
+  },
+  {
+    name: "browser_code_editor",
+    description:
+      "Read or replace the code in the page's code editor (Monaco on LeetCode, CodeMirror, Ace). Use it for code instead of browser_type, which breaks indents and brackets there. write then clicks the editor's Format button.",
+    input: z.object({
+      action: z.enum(["read", "write"]).describe("read: language and current code. write: replace all code."),
+      code: z.string().optional().describe("The complete code for write. Omit for read."),
+      format: z.boolean().optional().default(true).describe("false skips formatting after write."),
+      tab: z.number().optional().describe("Tab slot from browser_tabs. Omit for the active tab."),
+    }),
+    annotations: { destructiveHint: true },
   },
 ];
 
@@ -155,6 +176,7 @@ export function normalizeToolArgs(name: string, args: Record<string, unknown>): 
   // A url wins over a stray back/forward/reload.
   if (name === "browser_navigate" && out.url) delete out.action;
   if (name === "browser_tabs" && out.action === "list") delete out.tab;
+  if (name === "browser_code_editor" && out.action === "read") delete out.code;
   return out;
 }
 

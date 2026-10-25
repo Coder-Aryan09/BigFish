@@ -1,4 +1,4 @@
-// BigFish Executor: runs the 13 browser tools. Before a mutating action it
+// BigFish Executor: runs the 15 browser tools. Before a mutating action it
 // focuses the ref's tab, rehydrates vault tokens, asks for approval when the
 // action is risky, and after it returns a delta. Every result passes the PII
 // filter before it leaves the extension.
@@ -6,6 +6,8 @@ import { ErrorCode, normalizeToolArgs, toolError } from "@bigfish/contracts";
 import { tabsManager } from "./tabs.js";
 import { pageError, tabCall, waitForNavigation, waitForTabLoad } from "./page.js";
 import { buildDelta, buildSnapshot, buildTextSnapshot, clipValue, shortUrl, type ScanResult } from "./snapshot.js";
+import { captureMasked, ScreenshotError } from "./screenshot.js";
+import { pageEditor, type PageEditorResult } from "./code-editor.js";
 import { isForbiddenUrl } from "../../safety/url-policy.js";
 import { rehydrateArgs, sanitizeObservationForModel } from "../../safety/privacy.js";
 import { classifyAction, type ActionDescriptor } from "../../safety/action-policy.js";
@@ -20,11 +22,18 @@ export interface ExecuteOptions {
   onProgress?: (message: string) => void;
 }
 
+export interface ToolImage {
+  data: string;
+  mimeType: string;
+}
+
 interface ToolResult {
   ok: boolean;
   text: string;
   // Origin of the page the text came from, for the PII vault.
   origin?: string;
+  // Only browser_screenshot sets it, and only after every private spot was masked.
+  image?: ToolImage;
 }
 
 type Tab = Browser.tabs.Tab & { id: number };
@@ -42,6 +51,9 @@ const SETTLE_QUIET_MS = 600;
 const SETTLE_MAX_MS = 5_000;
 // browser_wait_for idle=true: no DOM change for this long means the page is done.
 const IDLE_QUIET_MS = 1_500;
+// Sites like LeetCode copy the editor text into their own state a moment after a
+// change, and their Format reads that state: format too soon and it gets the old code.
+const FORMAT_DELAY_MS = 600;
 
 class ToolFailure extends Error {
   constructor(readonly result: ToolResult) {
@@ -54,7 +66,7 @@ function fail(code: ErrorCode, message: string, hint?: string): never {
 }
 
 export class BrowserToolExecutor {
-  async execute(tool: string, rawArgs: any, _callerClient: string = "mcp", opts: ExecuteOptions = {}): Promise<{ ok: boolean; text: string }> {
+  async execute(tool: string, rawArgs: any, _callerClient: string = "mcp", opts: ExecuteOptions = {}): Promise<{ ok: boolean; text: string; image?: ToolImage }> {
     if (opts.signal?.aborted) {
       return { ok: false, text: toolError(ErrorCode.TIMEOUT, `${tool} was cancelled before it started.`) };
     }
@@ -70,7 +82,7 @@ export class BrowserToolExecutor {
     const origin = result.origin ?? (await activeOrigin());
     let text = sanitizeObservationForModel(result.text, origin);
     if (text.length > MAX_RESULT_CHARS) text = `${text.slice(0, MAX_RESULT_CHARS)}\n… cut at ${MAX_RESULT_CHARS} chars`;
-    return { ok: result.ok, text };
+    return { ok: result.ok, text, ...(result.ok && result.image ? { image: result.image } : {}) };
   }
 
   private run(tool: string, args: any, opts: ExecuteOptions): Promise<ToolResult> {
@@ -101,6 +113,10 @@ export class BrowserToolExecutor {
         return this.waitFor(args, opts);
       case "browser_extract":
         return this.extract(args);
+      case "browser_screenshot":
+        return this.screenshot(args, opts);
+      case "browser_code_editor":
+        return this.codeEditor(args, opts);
       default:
         return Promise.resolve({ ok: false, text: toolError(ErrorCode.INVALID_ARGS, `Unknown tool "${tool}"`) });
     }
@@ -437,7 +453,68 @@ export class BrowserToolExecutor {
     return { ok: true, text: resp.text, origin: safeOrigin(tab.url) };
   }
 
+  private async codeEditor(args: any, opts: ExecuteOptions): Promise<ToolResult> {
+    const tab = await this.tabFromArg(args.tab);
+    const slot = await tabsManager.slotOf(tab.id);
+    const origin = safeOrigin(tab.url);
+    if (args.action === "read") {
+      const res = editorOk(await pageEditor(tab.id, "read"));
+      return { ok: true, text: `ok ${res.kind} editor [tab ${slot}] | language ${res.language || "unknown"} | ${res.lines} lines\n${res.code}`, origin };
+    }
+    if (args.action !== "write") fail(ErrorCode.INVALID_ARGS, `Invalid action ${args.action}`, "Use read or write.");
+    if (!args.code) fail(ErrorCode.INVALID_ARGS, "Give code: the complete code to put in the editor.");
+
+    await focusTab(tab);
+    const { args: real, crossOrigins, unknown } = rehydrateArgs("browser_code_editor", { code: args.code }, origin);
+    if (unknown.length) fail(ErrorCode.INVALID_ARGS, `Unknown private data token ${unknown.join(", ")}.`, "Copy tokens exactly as a tool result showed them. Never make one up.");
+    await this.gate("browser_code_editor", real, tab, { crossOrigins }, opts);
+
+    const wrote = editorOk(await pageEditor(tab.id, "write", String(real.code)));
+    const head = `ok wrote ${wrote.lines} lines into the ${wrote.kind} editor [tab ${slot}] | language ${wrote.language || "unknown"}`;
+    if (args.format === false) return { ok: true, text: head, origin };
+    return { ok: true, text: `${head} | ${await this.formatCode(tab, wrote.code)}`, origin };
+  }
+
+  // Clicks the editor's Format button. Without one (or when the click fails), runs
+  // the editor's own format action, which is what such a button runs.
+  private async formatCode(tab: Tab, written: string): Promise<string> {
+    await new Promise((r) => setTimeout(r, FORMAT_DELAY_MS));
+    const button = await tabCall<{ ref?: string; name?: string }>(tab.id, "BIGFISH_FORMAT_BUTTON").catch(() => null);
+    if (button?.ok && button.ref) {
+      const click = await tabCall(tab.id, "BIGFISH_CLICK", { ref: button.ref }).catch(() => null);
+      if (click?.ok) {
+        const res = await pageEditor(tab.id, "wait_change", written);
+        return formatNote(`clicked "${button.name}"`, res);
+      }
+    }
+    const res = await pageEditor(tab.id, "format");
+    if (res.ok && !res.format) return "no Format button or format action here, code left as written";
+    return formatNote(res.ok ? `ran the editor's "${res.format}"` : "format failed", res);
+  }
+
   // ---- helpers ----------------------------------------------------------------------
+
+  private async screenshot(args: any, opts: ExecuteOptions): Promise<ToolResult> {
+    const tab = await this.tabFromArg(args.tab);
+    if (tab.windowId === undefined) fail(ErrorCode.TAB_NOT_FOUND, "The tab has no window.");
+    const slot = await tabsManager.slotOf(tab.id);
+    const origin = safeOrigin(tab.url);
+    // Chrome only captures the visible tab of a window.
+    await focusTab(tab);
+    try {
+      const shot = await captureMasked(tab.windowId!, origin, opts.signal);
+      const masked = shot.tokens.length ? `masked: ${shot.tokens.join(", ")}` : "nothing private found";
+      return {
+        ok: true,
+        text: `ok screenshot [tab ${slot}] ${shot.width}x${shot.height} | ${masked}`,
+        origin,
+        image: { data: shot.data, mimeType: shot.mimeType },
+      };
+    } catch (err) {
+      if (err instanceof ScreenshotError) fail(err.code, err.message, err.hint);
+      throw err;
+    }
+  }
 
   private async tabFromArg(slot: number | undefined): Promise<Tab> {
     const tab = slot ? await tabsManager.getTabBySlot(slot) : await tabsManager.getActiveTab();
@@ -548,6 +625,19 @@ function contentError(resp: any, ref?: string): ToolResult {
     default:
       return { ok: false, text: toolError(code, resp?.reason ?? "The page did not answer.", "Wait with browser_wait_for, then try once more.") };
   }
+}
+
+function editorOk(res: PageEditorResult): Extract<PageEditorResult, { ok: true }> {
+  if (res.ok) return res;
+  if (res.error === "NO_EDITOR") fail(ErrorCode.NOT_EDITABLE, "No code editor on this page.", "Open the problem page first. For plain text fields use browser_type.");
+  if (res.error === "READ_ONLY") fail(ErrorCode.NOT_EDITABLE, `Cannot write: ${res.reason}.`, "Open the editable editor (e.g. leave the submission view).");
+  return fail(ErrorCode.PAGE_UNRESPONSIVE, `Cannot write: ${res.reason}.`, "Read the editor, then try once more.");
+}
+
+function formatNote(how: string, res: PageEditorResult): string {
+  if (!res.ok) return `${how}, but the editor could not be read after it`;
+  if (!res.changed) return `${how}, code unchanged (already formatted, or the site needs you signed in)`;
+  return `${how}, formatted to ${res.lines} lines`;
 }
 
 function actionableHint(resp: any): string {

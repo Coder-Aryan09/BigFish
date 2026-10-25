@@ -8,10 +8,17 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { TOOLS, WS_PATH, type ToolContract } from "@bigfish/contracts";
 import { openMcpSocket, type OpenMcpSocketOptions } from "@bigfish/mcp-ws";
 
+export interface FakeResult {
+  text: string;
+  isError?: boolean;
+  // Sent as an MCP image block, like browser_screenshot.
+  image?: { data: string; mimeType: string };
+}
+
 export type FakeHandler = (
   args: Record<string, unknown>,
   extra: { signal: AbortSignal },
-) => Promise<string | { text: string; isError?: boolean }> | string | { text: string; isError?: boolean };
+) => Promise<string | FakeResult> | string | FakeResult;
 
 export interface FakeExtensionOptions
   extends Partial<Pick<OpenMcpSocketOptions, "contracts" | "heartbeatIntervalMs" | "heartbeatDeadlineMs">> {
@@ -49,8 +56,10 @@ export async function startFakeExtension(opts: FakeExtensionOptions) {
       async (args, ctx) => {
         const handler = opts.handlers?.[tool.name] ?? defaultHandler(tool.name, ext);
         const out = await handler(args as Record<string, unknown>, { signal: ctx.mcpReq.signal });
-        const { text, isError } = typeof out === "string" ? { text: out, isError: false } : out;
-        return { content: [{ type: "text" as const, text }], isError };
+        const { text, isError, image }: FakeResult = typeof out === "string" ? { text: out, isError: false } : out;
+        const content: ({ type: "text"; text: string } | { type: "image"; data: string; mimeType: string })[] = [{ type: "text", text }];
+        if (image) content.push({ type: "image", ...image });
+        return { content, isError };
       },
     );
   }

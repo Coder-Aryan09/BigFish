@@ -1,4 +1,4 @@
-import { vault } from "./pii-vault.ts";
+import { vault, vaultTokenRegex } from "./pii-vault.ts";
 
 // PII patterns. Each one must not fire on ids inside URLs or long digit runs,
 // so checksums are used where the format has one (cards: Luhn, Aadhaar: Verhoeff).
@@ -40,6 +40,30 @@ export function sanitizeObservationForModel(text: string, origin: string): strin
   }
 
   return sanitized;
+}
+
+// ML daemon category -> vault kind for masked screenshots. The token is [KIND_XXXX].
+const SCREENSHOT_KIND: Record<string, string> = {
+  EMAIL: "email",
+  PHONE: "phone",
+  AADHAAR: "aadhaar",
+  PAN: "pan",
+  CREDIT_CARD: "card",
+  SSN: "ssn",
+  PERSON: "name",
+  ADDRESS: "address",
+  PASSWORD: "secret",
+  CREDENTIAL: "secret",
+};
+
+// The label painted over one private spot in a screenshot. A value with text
+// goes into the vault, the same way the text filter stores it, so the model
+// can type the token later. Spots without text (a face in a photo) get a fixed
+// label that rehydrates to nothing.
+export function screenshotPlaceholder(region: { category: string; text?: string | null; sources?: string[] }, origin: string): string {
+  const text = region.text?.trim();
+  if (!text) return region.sources?.includes("cv") ? "[PHOTO]" : "[MASKED]";
+  return vault.tokenize(SCREENSHOT_KIND[region.category] ?? "secret", text, origin);
 }
 
 export function luhnValid(value: string): boolean {
@@ -120,6 +144,6 @@ export function rehydrateArgs(
 
   walkAndRehydrate(cloned);
   // A token still there after rehydration is not in the vault: the model made it up.
-  const unknown = [...new Set(JSON.stringify(cloned).match(/\[(EMAIL|PHONE|AADHAAR|PAN|CARD|SSN|SECRET)_[0-9A-F]{4}\]/g) ?? [])];
+  const unknown = [...new Set(JSON.stringify(cloned).match(vaultTokenRegex()) ?? [])];
   return { args: cloned, crossOrigins: Array.from(crossOriginsSet), rehydrated, unknown };
 }

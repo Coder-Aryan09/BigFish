@@ -1,7 +1,7 @@
 // Personal details guard: made-up names and phones never reach the browser.
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { checkPersonalValues } from "../src/agent/personal-guard.js";
+import { allowsMadeUpValues, checkPersonalValues } from "../src/agent/personal-guard.js";
 
 const SNAPSHOT = [
   "[tab 2] Hackathon Feedback | 127.0.0.1/gform.html | scroll 0/2286",
@@ -42,5 +42,14 @@ describe("personal details guard", () => {
     const page = `${SNAPSHOT}\nSigned in as Priya Nair`;
     assert.equal(checkPersonalValues("browser_type", { ref: "2:14", text: "Priya Nair" }, { task: "fill the form", results: [page] }), null);
     assert.equal(checkPersonalValues("browser_type", { ref: "2:14", text: "John Doe" }, { task: "fill the form with dummy data", results: [SNAPSHOT] }), null);
+  });
+
+  test("dummy data is allowed however the user says it, English, Hinglish or Devanagari", () => {
+    for (const task of ["use test details", "make something up", "fill with mock values", "kuch bhi daal do", "डमी डिटेल्स के साथ फॉर्म भर दो"]) {
+      assert.equal(allowsMadeUpValues(task), true, task);
+    }
+    for (const task of ["fill the form", "test whether the form submits", "my name is Asha"]) {
+      assert.equal(allowsMadeUpValues(task), false, task);
+    }
   });
 });

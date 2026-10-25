@@ -236,6 +236,9 @@ export class BigFishDOMEngine {
       const inViewport = this.inViewport(el);
       if (opts.viewportOnly && !inViewport) continue;
 
+      // Skip hidden Monaco inputarea textareas — we expose the Monaco editor container instead.
+      if (el instanceof HTMLTextAreaElement && el.classList.contains("inputarea") && el.closest(".monaco-editor")) continue;
+
       const ref = this.refFor(el);
       const role = this.getRole(el);
       const name = this.getAccessibleName(el);
@@ -255,6 +258,26 @@ export class BigFishDOMEngine {
       else if (role === "option" && el.hasAttribute("aria-selected")) entry.checked = el.getAttribute("aria-selected") === "true";
       results.push(entry);
     }
+
+    // ── Monaco editors: expose each .monaco-editor container as a textbox so ──
+    // the agent can reference and type into it. Monaco doesn't use standard form
+    // elements, so it would be invisible to the normal INTERACTIVE_SELECTOR scan.
+    // We match any .monaco-editor that has a visible textarea.inputarea child.
+    const seenMonaco = new Set<HTMLElement>();
+    for (const inputArea of deepQueryAll<HTMLTextAreaElement>(root, ".monaco-editor textarea.inputarea")) {
+      const monacoEl = inputArea.closest<HTMLElement>(".monaco-editor");
+      if (!monacoEl || seenMonaco.has(monacoEl)) continue;
+      seenMonaco.add(monacoEl);
+      if (results.length >= max) break;
+      if (!this.isVisible(monacoEl)) continue;
+      const inViewport = this.inViewport(monacoEl);
+      if (opts.viewportOnly && !inViewport) continue;
+      const ref = this.refFor(monacoEl);
+      this.elementMap.set(ref, monacoEl);
+      this.fingerprintMap.set(ref, { role: "textbox", name: "code editor", tag: "div", css: ".monaco-editor" });
+      results.push({ ref, role: "textbox", name: "code editor", inViewport, value: "" });
+    }
+
     if (within) return results;
     // An open dialog (Gmail compose, a modal form) is where the next action is: list it first,
     // then what is in view, then the rest of the page.
@@ -389,6 +412,9 @@ export class BigFishDOMEngine {
       const root = el.getRootNode() as Document | ShadowRoot;
       const top = (root.elementFromPoint ?? document.elementFromPoint).call(root, r2.left + r2.width / 2, r2.top + r2.height / 2) as HTMLElement | null;
       if (!top || top === el || el.contains(top) || top.contains(el) || top.closest("label")?.contains(el)) return { ok: true };
+      // Monaco editor: the element itself or an ancestor is a monaco editor container.
+      // The covering element will be a .view-line or .view-overlays span, which is fine.
+      if (el.querySelector(".monaco-editor") || el.closest(".monaco-editor") || top.closest(".monaco-editor")) return { ok: true };
       const cover = top.closest<HTMLElement>("[data-bigfish-id]");
       const coverName = this.getAccessibleName(top).slice(0, 30);
       lastReason = `covered by ${cover ? top.tagName.toLowerCase() : this.computeCssSelector(top)}${coverName && !cover ? ` "${coverName}"` : ""}`;
@@ -406,6 +432,14 @@ export class BigFishDOMEngine {
     if (!ready.ok) return { ok: false, error: "NOT_ACTIONABLE", reason: ready.reason, coveringRef: ready.coveringRef };
     await agentCursor.pointAt(el, "Clicking");
     await agentCursor.press();
+
+    // Monaco editor: clicking the container should focus the inputarea so typing works.
+    const monacoInput = el.querySelector<HTMLTextAreaElement>("textarea.inputarea") ?? (el.closest(".monaco-editor")?.querySelector<HTMLTextAreaElement>("textarea.inputarea") ?? null);
+    if (monacoInput) {
+      monacoInput.focus();
+      return { ok: true, role: "textbox", name: "code editor" };
+    }
+
     const opts = { bubbles: true, cancelable: true, view: window };
     el.dispatchEvent(new PointerEvent("pointerdown", opts));
     el.dispatchEvent(new MouseEvent("mousedown", opts));
@@ -421,6 +455,20 @@ export class BigFishDOMEngine {
     if (!el) return this.stale(ref);
     const ready = await this.waitActionable(el);
     if (!ready.ok) return { ok: false, error: "NOT_ACTIONABLE", reason: ready.reason, coveringRef: ready.coveringRef };
+
+    // ── Monaco editor path (LeetCode, VS Code Online, etc.) ──────────────────
+    // Monaco renders its code via DOM overlays; the only real input surface is
+    // the hidden <textarea class="inputarea"> or the window.monaco JS API.
+    const monacoRoot = el.querySelector(".monaco-editor") ?? el.closest(".monaco-editor") ?? (el.classList.contains("monaco-editor") ? el : null) as HTMLElement | null;
+    if (monacoRoot) {
+      await agentCursor.pointAt(monacoRoot, "Typing in editor");
+      await agentCursor.press();
+      const monacoResult = await this.typeInMonaco(monacoRoot, text, opts.clear !== false);
+      if (monacoResult.ok && opts.submit) this.pressEnter(monacoRoot);
+      return monacoResult;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     const isField = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
     const editable = isField ? el : el.isContentEditable ? el : (el.querySelector<HTMLElement>("[contenteditable='true'], textarea, input") ?? null);
     if (!editable) return { ok: false, error: "NOT_EDITABLE", reason: `${this.getRole(el)} is not a text field` };
@@ -457,6 +505,96 @@ export class BigFishDOMEngine {
     if (opts.submit) this.pressEnter(editable);
     return { ok: true, role: this.getRole(el), name: this.getAccessibleName(el), value: this.valueOf(editable, "textbox") ?? "" };
   }
+
+  // ── Monaco editor typing ────────────────────────────────────────────────────
+  // Strategy 1: window.monaco API (fastest, most reliable)
+  // Strategy 2: focus the hidden inputarea <textarea> and dispatch keyboard events
+  private async typeInMonaco(monacoRoot: HTMLElement, text: string, clear: boolean): Promise<ActionResult> {
+    // Strategy 1: Use the Monaco JS API if it's available on window.
+    const win = window as any;
+    if (win.monaco?.editor) {
+      try {
+        const editors: any[] = win.monaco.editor.getEditors?.() ?? [];
+        // Find the editor whose DOM node contains or is our monacoRoot.
+        let target = editors.find((e: any) => {
+          try { return monacoRoot.contains(e.getDomNode()) || e.getDomNode()?.contains(monacoRoot); } catch { return false; }
+        }) ?? editors[0];
+        if (target) {
+          const model = target.getModel();
+          if (model) {
+            if (clear) {
+              const range = model.getFullModelRange();
+              target.executeEdits("bigfish", [{ range, text: "" }]);
+              target.setPosition({ lineNumber: 1, column: 1 });
+            }
+            // Insert the text at current cursor position
+            target.executeEdits("bigfish", [{ range: target.getSelection(), text }]);
+            target.focus();
+            await sleep(100);
+            const value: string = model.getValue();
+            return { ok: true, role: "textbox", name: "code editor", value: value.slice(0, 80) };
+          }
+        }
+      } catch {
+        // fall through to strategy 2
+      }
+    }
+
+    // Strategy 2: The hidden <textarea class="inputarea"> is Monaco's actual keyboard
+    // input surface. Monaco's controller reads it via composition/input events.
+    // We focus it, dispatch Ctrl+A + Delete to clear, then use execCommand('insertText')
+    // which is exactly how the browser feeds typed characters to the textarea.
+    const inputArea = monacoRoot.querySelector<HTMLTextAreaElement>("textarea.inputarea");
+    if (!inputArea) {
+      return { ok: false, error: "NOT_EDITABLE", reason: "Monaco editor inputarea not found" };
+    }
+    inputArea.focus();
+    await sleep(100);
+
+    if (clear) {
+      // Ctrl+A: Monaco's keydown handler selects all content in the editor model.
+      const selAll: KeyboardEventInit = { key: "a", code: "KeyA", keyCode: 65, ctrlKey: true, bubbles: true, cancelable: true };
+      inputArea.dispatchEvent(new KeyboardEvent("keydown", selAll));
+      inputArea.dispatchEvent(new KeyboardEvent("keyup", selAll));
+      await sleep(80);
+      // Delete: remove the selection
+      const delKey: KeyboardEventInit = { key: "Delete", code: "Delete", keyCode: 46, bubbles: true, cancelable: true };
+      inputArea.dispatchEvent(new KeyboardEvent("keydown", delKey));
+      inputArea.dispatchEvent(new KeyboardEvent("keyup", delKey));
+      await sleep(100);
+    }
+
+    // Use execCommand('insertText') — this is how the browser itself inserts typed
+    // characters into a focused textarea, and Monaco listens to the resulting input event.
+    // We chunk text at newlines so we can dispatch Enter key events for line breaks.
+    const lines = text.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]!;
+      if (line.length > 0) {
+        // Select-all on inputarea value, replace with the line text.
+        // execCommand on a focused textarea dispatches the real input event Monaco expects.
+        const inserted = document.execCommand("insertText", false, line);
+        if (!inserted) {
+          // execCommand may be deprecated in some browsers; fall back to direct value set.
+          const nativeSet = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+          nativeSet.call(inputArea, line);
+          inputArea.dispatchEvent(new InputEvent("input", { inputType: "insertText", data: line, bubbles: true }));
+        }
+        await sleep(10);
+      }
+      if (i < lines.length - 1) {
+        // Newline: dispatch an Enter keydown so Monaco inserts a line break with proper indentation.
+        const enterKey: KeyboardEventInit = { key: "Enter", code: "Enter", keyCode: 13, bubbles: true, cancelable: true };
+        inputArea.dispatchEvent(new KeyboardEvent("keydown", enterKey));
+        inputArea.dispatchEvent(new KeyboardEvent("keypress", enterKey));
+        inputArea.dispatchEvent(new KeyboardEvent("keyup", enterKey));
+        await sleep(20);
+      }
+    }
+    await sleep(200);
+    return { ok: true, role: "textbox", name: "code editor", value: text.slice(0, 80) };
+  }
+  // ─────────────────────────────────────────────────────────────────────────────
 
   // browser_fill_form: one field of any kind. Radios and checkboxes are clicked
   // (a checkbox only when its state must change), dropdowns are selected, the rest is typed.

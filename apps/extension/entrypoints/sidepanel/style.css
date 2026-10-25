@@ -563,18 +563,19 @@ html, body {
   margin: 0 auto;
 }
 
-/* Quick Action Cards Grid (Luminous Glass) */
+/* Quick Action Cards Grid (Luminous Glass 2x2 Short Action Pills) */
 .quick-actions-grid {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
   gap: 8px;
+  width: 100%;
 }
 
 .action-card {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 8px;
+  padding: 8px 10px;
   background-color: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -585,6 +586,7 @@ html, body {
   width: 100%;
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
+  user-select: none;
 }
 
 .action-card:hover {
@@ -594,14 +596,13 @@ html, body {
   box-shadow: var(--shadow-md);
 }
 
-.action-card:hover .action-arrow {
-  color: var(--primary);
-  transform: translateX(3px);
+.action-card:active {
+  transform: translateY(0);
 }
 
 .action-icon {
-  width: 32px;
-  height: 32px;
+  width: 24px;
+  height: 24px;
   border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
@@ -629,32 +630,13 @@ html, body {
   color: var(--amber);
 }
 
-.action-text {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
 .action-title {
-  font-size: 12.5px;
+  font-size: 11.5px;
   font-weight: 600;
   color: var(--text-main);
-  margin-bottom: 1px;
-}
-
-.action-desc {
-  font-size: 11px;
-  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.action-arrow {
-  color: var(--text-muted);
-  font-size: 13px;
-  transition: transform 150ms ease, color 150ms ease;
 }
 
 /* ==========================================================================

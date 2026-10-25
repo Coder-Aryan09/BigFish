@@ -151,8 +151,12 @@ void main() {
   vec4 tile = getHexTile(pixelPos, hexRadius);
   float edgeDist = hexEdgeDist(tile.xy, hexRadius);
 
-  // Compute distance to mouse
+  // Compute distance to mouse and center
   float distM = length(pixelPos - uMouse);
+  vec2 centerPos = uResolution * 0.5;
+  float distCenter = length(pixelPos - centerPos);
+  float maxDim = length(uResolution * 0.5);
+
   float effectiveRadius = 120.0 * uGlowRadius * uDpr;
 
   // Primary cursor lighting
@@ -176,7 +180,24 @@ void main() {
     trailLight = max(trailLight, tL);
   }
 
-  float totalLight = max(cursorLight, trailLight);
+  float mouseLight = max(cursorLight, trailLight);
+
+  // Autonomous radiant waves expanding from center outward to ends when mouse leaves
+  float normDistCenter = distCenter / max(maxDim, 1.0);
+  float wavePhase = normDistCenter * 9.0 - uTime * 2.2 * uSpeed;
+  float centerPulse = sin(wavePhase) * 0.5 + 0.5;
+  centerPulse = smoothstep(0.2, 0.85, centerPulse);
+
+  float wavePhase2 = normDistCenter * 14.0 - uTime * 3.4 * uSpeed;
+  float centerPulse2 = (sin(wavePhase2) * 0.5 + 0.5) * 0.35;
+
+  float radialBloom = exp(-normDistCenter * 1.5) * 0.75;
+  float centerWaveLight = clamp((centerPulse * 0.65 + centerPulse2) * exp(-normDistCenter * 0.75) + radialBloom * 0.35, 0.0, 1.0);
+
+  // Smooth blend between active cursor follow and center-to-edge wave
+  float activeFactor = clamp(uMouseActive, 0.0, 1.0);
+  float totalLight = mix(centerWaveLight, mouseLight, activeFactor);
+  minLightDist = mix(distCenter * 0.65, minLightDist, activeFactor);
 
   // Flow ripple modulation along hex lines
   float wave = sin(minLightDist * 0.055 / uDpr - uTime * 3.2 * uSpeed) * 0.5 + 0.5;
@@ -283,7 +304,8 @@ export class HexagonalVault {
     // Mouse Tracking with smooth spring / lerp
     this.targetMouse = { x: -9999, y: -9999 };
     this.currentMouse = { x: -9999, y: -9999 };
-    this.mouseActive = 0;
+    this.mouseActive = 0.0;
+    this.isHovered = false;
     this.mouseMoved = false;
 
     // Trail buffer (6 points max)
@@ -406,12 +428,16 @@ export class HexagonalVault {
       const rect = this.canvas.getBoundingClientRect();
       this.targetMouse.x = (e.clientX - rect.left) * this.dpr;
       this.targetMouse.y = (rect.height - (e.clientY - rect.top)) * this.dpr;
-      this.mouseActive = 1.0;
+      this.isHovered = true;
       this.mouseMoved = true;
     };
 
     this._onMouseLeave = () => {
-      this.mouseActive = 0.0;
+      this.isHovered = false;
+    };
+
+    this._onMouseEnter = () => {
+      this.isHovered = true;
     };
 
     this._onResize = () => this._resize();
@@ -422,6 +448,7 @@ export class HexagonalVault {
 
     window.addEventListener('mousemove', this._onMouseMove, { passive: true });
     document.addEventListener('mouseleave', this._onMouseLeave, { passive: true });
+    document.addEventListener('mouseenter', this._onMouseEnter, { passive: true });
     window.addEventListener('resize', this._onResize, { passive: true });
     document.addEventListener('visibilitychange', this._onVisibility, { passive: true });
   }
@@ -475,19 +502,22 @@ export class HexagonalVault {
   }
 
   _update(timeSec) {
+    // Smooth transition of mouseActive factor
+    const targetActive = this.isHovered ? 1.0 : 0.0;
+    this.mouseActive += (targetActive - this.mouseActive) * 0.06;
+
     // Smooth pointer tracking (follow lerp)
     const followRate = Math.min(this.options.follow * 0.45, 0.9);
 
-    if (!this.mouseMoved) {
-      // Gentle autonomous ambient drift if mouse hasn't moved yet
-      const w = this.canvas.width;
-      const h = this.canvas.height;
-      const t = timeSec * 0.8 * this.options.speed;
-      this.currentMouse.x = w * 0.5 + Math.sin(t) * w * 0.22;
-      this.currentMouse.y = h * 0.5 + Math.cos(t * 1.3) * h * 0.2;
-    } else {
+    if (this.isHovered) {
       this.currentMouse.x += (this.targetMouse.x - this.currentMouse.x) * followRate;
       this.currentMouse.y += (this.targetMouse.y - this.currentMouse.y) * followRate;
+    } else {
+      // Gently drift currentMouse toward center when mouse is outside panel
+      const w = this.canvas.width;
+      const h = this.canvas.height;
+      this.currentMouse.x += (w * 0.5 - this.currentMouse.x) * 0.05;
+      this.currentMouse.y += (h * 0.5 - this.currentMouse.y) * 0.05;
     }
 
     // Update trail queue
@@ -528,7 +558,7 @@ export class HexagonalVault {
     if (this.visible && this.gl) {
       // Dynamic framerate throttling: 60fps when user is interacting, 30fps resting to avoid any CPU/GPU lag
       const delta = now - this.lastFrameTime;
-      const targetInterval = this.mouseActive ? 16.0 : 33.3;
+      const targetInterval = 16.0; // 60fps continuous silky smooth rendering
       if (delta >= targetInterval) {
         this.lastFrameTime = now - (delta % targetInterval);
 
@@ -617,6 +647,7 @@ export class HexagonalVault {
     }
     window.removeEventListener('mousemove', this._onMouseMove);
     document.removeEventListener('mouseleave', this._onMouseLeave);
+    document.removeEventListener('mouseenter', this._onMouseEnter);
     window.removeEventListener('resize', this._onResize);
     document.removeEventListener('visibilitychange', this._onVisibility);
 

@@ -46,6 +46,12 @@ describe("PII redaction", () => {
     const text = "https://www.google.com/?zx=1792860363093 order #8765432109876 →/c/6adce210-0a4c-83ee";
     assert.equal(sanitizeObservationForModel(text, ORIGIN), text);
   });
+
+  test("Google Form links and testing URLs are strictly preserved and never tokenized", () => {
+    const formUrl = "https://docs.google.com/forms/d/e/1FAIpQLSeZeKBlwODUCXwg2dg5NM5WuzOM8gtqP5YmZsOmuJ3DriCDIQ/viewform";
+    const text = `Open this link: ${formUrl} and submit form`;
+    assert.equal(sanitizeObservationForModel(text, ORIGIN), text);
+  });
 });
 
 describe("rehydration", () => {

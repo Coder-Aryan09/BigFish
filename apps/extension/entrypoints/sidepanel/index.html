@@ -3,30 +3,27 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>BigFish — Browser AI</title>
+    <title>BigFish — Sovereign Agentic Shield</title>
+    <link rel="icon" type="image/png" href="/icon/icon-32.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
     <div id="app" class="app-layout">
-      
-      <!-- Minimalist Header -->
+      <!-- Hexagonal Vault WebGL2 Background (Interactive Hex Grid with Cursor Follow Soft Light) -->
+      <div class="ambient-chat-aura" id="ambientAura" data-state="idle" aria-hidden="true">
+        <canvas id="particleWaveCanvas" class="particle-wave-canvas"></canvas>
+      </div>
+
+      <!-- Minimalist Frosted Glass Header -->
       <header class="app-header">
         <div class="brand">
-          <svg class="brand-logo" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect width="32" height="32" rx="8" fill="url(#bf-grad)" />
-            <path d="M7 16C10.5 11 16 9.5 22 11C20.5 14 20.5 18 22 21C16 22.5 10.5 21 7 16Z" fill="white" fill-opacity="0.95" />
-            <path d="M22 16L26 12V20L22 16Z" fill="white" fill-opacity="0.9" />
-            <circle cx="12" cy="14.5" r="1.5" fill="#1d4ed8" />
-            <defs>
-              <linearGradient id="bf-grad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-                <stop stop-color="#2563EB" />
-                <stop offset="1" stop-color="#1D4ED8" />
-              </linearGradient>
-            </defs>
-          </svg>
+          <img src="/icon/icon-48.png" alt="BigFish" class="brand-logo" width="24" height="24" />
           <span class="brand-name">BigFish</span>
           <span class="brand-tag">Browser Agent</span>
         </div>
@@ -36,11 +33,18 @@
             <span class="pulse-dot"></span>
             <span id="conn-label" class="status-label">Starting</span>
           </div>
+
           <button id="btn-cursor" class="btn-ghost-icon btn-cursor" title="Agent cursor: on" aria-label="Show the agent cursor on the page" aria-pressed="true">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round">
               <path d="M4 3l15 9-6.5 1.4L9.3 20z"></path>
             </svg>
           </button>
+
+          <button id="btn-theme-toggle" class="btn-ghost-icon btn-theme-toggle" title="Toggle Theme (Dark / Light)" aria-label="Toggle Theme">
+            <span class="theme-icon-dark" style="font-size: 13px;">☀️</span>
+            <span class="theme-icon-light" style="display: none; font-size: 13px;">🌙</span>
+          </button>
+
           <button id="btn-reset" class="btn-ghost-icon" title="New Session / Reset" aria-label="Reset">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
@@ -64,7 +68,7 @@
         </div>
       </div>
 
-      <!-- Active Page Pill -->
+      <!-- Active Page Strip -->
       <div class="active-tab-strip">
         <div class="tab-indicator-badge">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -84,86 +88,76 @@
 
       <!-- Main Canvas -->
       <main class="main-canvas" id="main-canvas">
-        
         <!-- Welcome Hero View (Shown initially) -->
         <div id="welcome-view" class="welcome-container">
+          <!-- Robot Mascot Stage -->
+          <div class="welcome-robot-stage" aria-hidden="true">
+            <picture>
+              <source srcset="/assets/robot-waving.webp" type="image/webp" />
+              <img src="/assets/robot-waving.gif" alt="Autonomous AI Robot Greeting" class="welcome-robot-media" />
+            </picture>
+          </div>
           <div class="hero-section">
-            <div class="hero-badge">BigFish AI</div>
+            <div class="hero-badge">
+              <img src="/icon/icon-32.png" alt="BigFish" class="hero-badge-logo" width="14" height="14" />
+              <span>BigFish: Private Browser for Any Agent</span>
+            </div>
             <h1 class="hero-title">What do you want me to do?</h1>
             <p class="hero-subtitle">
               Ask anything, drive this browser tab, fill forms, or extract data with zero sensitive data leaks.
             </p>
           </div>
 
-          <!-- Starter Quick Actions -->
+          <!-- Starter Quick Actions: 2x2 Short Action Pills -->
           <div class="quick-actions-grid">
-            <button class="action-card" data-cmd="Summarize the key information and takeaways from this page">
-              <div class="action-icon blue">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <button class="action-card card-blue" data-cmd="Summarize the key information and takeaways from this page" title="Summarize page content">
+              <span class="action-icon blue">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                   <polyline points="14 2 14 8 20 8"></polyline>
                   <line x1="16" y1="13" x2="8" y2="13"></line>
                   <line x1="16" y1="17" x2="8" y2="17"></line>
                 </svg>
-              </div>
-              <div class="action-text">
-                <span class="action-title">Summarize page</span>
-                <span class="action-desc">Extract key points and structure</span>
-              </div>
-              <span class="action-arrow">→</span>
+              </span>
+              <span class="action-title">Summarize</span>
             </button>
 
-            <button class="action-card" data-cmd="Inspect all form inputs on this page and safely autofill them">
-              <div class="action-icon emerald">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <button class="action-card card-emerald" data-cmd="Inspect all form inputs on this page and safely autofill them" title="Fill out form">
+              <span class="action-icon emerald">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
                   <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
                 </svg>
-              </div>
-              <div class="action-text">
-                <span class="action-title">Fill out form</span>
-                <span class="action-desc">Auto-populate with safe local vault</span>
-              </div>
-              <span class="action-arrow">→</span>
+              </span>
+              <span class="action-title">Fill form</span>
             </button>
 
-            <button class="action-card" data-cmd="Extract table and pricing data into a structured JSON list">
-              <div class="action-icon purple">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <button class="action-card card-purple" data-cmd="Extract table and pricing data into a structured JSON list" title="Extract table data">
+              <span class="action-icon purple">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
                   <line x1="3" y1="9" x2="21" y2="9"></line>
                   <line x1="3" y1="15" x2="21" y2="15"></line>
                   <line x1="9" y1="3" x2="9" y2="21"></line>
                 </svg>
-              </div>
-              <div class="action-text">
-                <span class="action-title">Extract table data</span>
-                <span class="action-desc">Export rows &amp; items to clean data</span>
-              </div>
-              <span class="action-arrow">→</span>
+              </span>
+              <span class="action-title">Extract data</span>
             </button>
 
-            <button class="action-card" data-cmd="Scan this page for tracking pixels, hidden inputs, and PII exposure">
-              <div class="action-icon amber">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <button class="action-card card-amber" data-cmd="Scan this page for tracking pixels, hidden inputs, and PII exposure" title="Audit privacy & trackers">
+              <span class="action-icon amber">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
                   <circle cx="12" cy="11" r="3"></circle>
                 </svg>
-              </div>
-              <div class="action-text">
-                <span class="action-title">Inspect privacy</span>
-                <span class="action-desc">Audit trackers and sensitive fields</span>
-              </div>
-              <span class="action-arrow">→</span>
+              </span>
+              <span class="action-title">Privacy audit</span>
             </button>
           </div>
         </div>
 
-        <!-- Task Feed View (Shown once user submits a prompt) -->
-        <div id="feed-view" class="feed-container" style="display: none;">
-          <!-- Dynamically populated via main.ts -->
-        </div>
-
+        <!-- Task Feed View (Populated dynamically by main.ts) -->
+        <div id="feed-view" class="feed-container" style="display: none;"></div>
       </main>
 
       <!-- Bottom Command & Input Area -->
@@ -203,7 +197,7 @@
           </div>
         </div>
 
-        <!-- Quick Slash Command Dropdown (hidden by default) -->
+        <!-- Quick Slash Command Dropdown -->
         <div id="slash-menu" class="slash-menu" style="display: none;">
           <div class="menu-item" data-cmd="/summarize">
             <strong>/summarize</strong>
@@ -227,7 +221,6 @@
           </div>
         </div>
       </footer>
-
     </div>
 
     <script type="module" src="./main.ts"></script>

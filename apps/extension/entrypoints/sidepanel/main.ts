@@ -4,6 +4,7 @@ import type { ConnState, ConnStatus } from "../background/conn/connection.js";
 import { startAgentRun, type AgentRun } from "./agent-client.js";
 import type { ApprovalRequest } from "../../safety/approval.js";
 import { setupVoiceInput } from "./voice-input.js";
+import { HexagonalVault } from "./hexagonal-vault.js";
 
 const CONN_LABELS: Record<ConnState, string> = {
   signed_out: "Signed out",
@@ -96,6 +97,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const inputHint = document.querySelector<HTMLElement>("#input-hint");
   const resetBtn = document.querySelector<HTMLButtonElement>("#btn-reset");
   const cursorBtn = document.querySelector<HTMLButtonElement>("#btn-cursor");
+  const themeToggleBtn = document.querySelector<HTMLButtonElement>("#btn-theme-toggle");
 
   // Agent cursor on the page (content script reads the same setting).
   const CURSOR_KEY = "bigfish.cursor";
@@ -109,6 +111,48 @@ document.addEventListener("DOMContentLoaded", () => {
     const on = cursorBtn.getAttribute("aria-pressed") !== "true";
     renderCursorToggle(on);
     void browser.storage.local.set({ [CURSOR_KEY]: on });
+  });
+
+  // Hexagonal Vault WebGL2 Background
+  let vaultEngine: any = null;
+  const canvasEl = document.querySelector<HTMLCanvasElement>("#particleWaveCanvas");
+  if (canvasEl) {
+    try {
+      vaultEngine = new HexagonalVault(canvasEl, {
+        theme: document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark",
+      });
+    } catch (err) {
+      console.warn("[BigFish] HexagonalVault init error:", err);
+    }
+  }
+
+  // Dual Theme Toggle (Dark / Light)
+  const THEME_KEY = "bigfish.theme";
+  const renderTheme = (theme: "light" | "dark") => {
+    document.documentElement.setAttribute("data-theme", theme);
+    if (vaultEngine) {
+      vaultEngine.setTheme(theme);
+    }
+    if (themeToggleBtn) {
+      themeToggleBtn.setAttribute("data-theme", theme);
+      themeToggleBtn.title = `Switch to ${theme === "dark" ? "light" : "dark"} mode`;
+      const darkIcon = themeToggleBtn.querySelector(".theme-icon-dark");
+      const lightIcon = themeToggleBtn.querySelector(".theme-icon-light");
+      if (darkIcon && lightIcon) {
+        (darkIcon as HTMLElement).style.display = theme === "dark" ? "inline-block" : "none";
+        (lightIcon as HTMLElement).style.display = theme === "dark" ? "none" : "inline-block";
+      }
+    }
+  };
+  void browser.storage.local.get(THEME_KEY).then((stored) => {
+    const theme = (stored[THEME_KEY] as "light" | "dark") || "dark";
+    renderTheme(theme);
+  });
+  themeToggleBtn?.addEventListener("click", () => {
+    const current = document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+    const next = current === "dark" ? "light" : "dark";
+    renderTheme(next);
+    void browser.storage.local.set({ [THEME_KEY]: next });
   });
   const welcomeView = document.querySelector<HTMLElement>("#welcome-view");
   const feedView = document.querySelector<HTMLElement>("#feed-view");
@@ -213,8 +257,8 @@ document.addEventListener("DOMContentLoaded", () => {
       inputEl.style.height = `${Math.min(inputEl.scrollHeight, 100)}px`;
     });
 
-    inputEl.addEventListener("keydown", (e: KeyboardEvent) => {
-      if (e.key === "Enter" && !e.shiftKey) {
+    inputEl.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         const text = inputEl.value.trim();
         if (text) {

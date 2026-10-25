@@ -2,6 +2,7 @@
 #             python -m ML.src.privacy.privacy_engine
 
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -30,6 +31,14 @@ class PrivacyEngine:
         "UNKNOWN",
     }
 
+    # Explicit entity types that must NEVER be masked (URLs, navigation targets, testing endpoints)
+    EXEMPT_TYPES = {
+        "URL",
+        "LINK",
+        "PUBLIC_LINK",
+        "DOMAIN",
+    }
+
     TYPE_ALIASES = {
         "PER": "PERSON",
         "ORG": "ORGANIZATION",
@@ -39,6 +48,9 @@ class PrivacyEngine:
         "PHONE_NUMBER": "PHONE",
         "ID": "IDENTIFIER",
         "ID_NUMBER": "IDENTIFIER",
+        "URL": "URL",
+        "LINK": "URL",
+        "PUBLIC_LINK": "URL",
     }
 
     def __init__(
@@ -118,20 +130,38 @@ class PrivacyEngine:
 
             resolver_id = entity.get("entity_id")
             entity_type = self._canonical_type(entity.get("type"))
+            text = str(entity.get("text") or "")
+
+            # Autonomous testing and browser tasks require reading and navigating URLs
+            is_url = (
+                entity_type in self.EXEMPT_TYPES
+                or bool(
+                    re.search(
+                        r'(?:https?://|www\.)\S+|docs\.google\.com/\S+|'
+                        r'^[a-zA-Z0-9-]+\.(?:com|org|net|edu|gov|io|ai|co|dev|app|in)(?:/\S*)?$',
+                        text.strip(),
+                        re.IGNORECASE,
+                    )
+                )
+            )
+
             requires_review = bool(entity.get("requires_review", False))
 
-            should_mask = (
-                entity_type in self.SENSITIVE_TYPES
-                or requires_review
-            )
+            if is_url:
+                should_mask = False
+            else:
+                should_mask = (
+                    entity_type in self.SENSITIVE_TYPES
+                    or requires_review
+                )
 
             # Never include raw text or evidence in the plan.
             if not should_mask:
                 decisions.append({
                     "entity_id": None,
-                    "type": entity_type,
+                    "type": "URL" if is_url else entity_type,
                     "action": "no_mask",
-                    "reason": "Not classified as sensitive by current policy",
+                    "reason": "URL/testing link preserved for browser access and testing" if is_url else "Not classified as sensitive by current policy",
                     "requires_review": False,
                 })
                 continue

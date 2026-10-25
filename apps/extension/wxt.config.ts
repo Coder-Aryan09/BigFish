@@ -21,7 +21,21 @@ export default defineConfig({
       minimum_chrome_version: "116",
       permissions: ["tabs", "activeTab", "scripting", "storage", "sidePanel", "tabGroups", "alarms", "identity"],
       host_permissions: ["<all_urls>"],
-      action: { default_title: "BigFish", default_icon: "icon/icon.svg" },
+      icons: {
+        "16": "icon/icon-16.png",
+        "32": "icon/icon-32.png",
+        "48": "icon/icon-48.png",
+        "128": "icon/icon-128.png",
+      },
+      action: {
+        default_title: "BigFish",
+        default_icon: {
+          "16": "icon/icon-16.png",
+          "32": "icon/icon-32.png",
+          "48": "icon/icon-48.png",
+          "128": "icon/icon-128.png",
+        },
+      },
       ...(key ? { key } : {}),
       ...(clientId ? { oauth2: { client_id: clientId, scopes: ["openid", "email", "profile"] } } : {}),
     };

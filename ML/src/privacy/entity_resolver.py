@@ -66,6 +66,10 @@ TYPE_ALIASES = {
     "PASSWORD": "PASSWORD",
     "USERNAME": "USERNAME",
 
+    "URL": "URL",
+    "LINK": "URL",
+    "PUBLIC_LINK": "URL",
+
     "TEXT": "UNKNOWN",
     "OCR_TEXT": "UNKNOWN",
     "UNKNOWN": "UNKNOWN",
@@ -526,11 +530,33 @@ class EntityResolver:
             )
 
             
+            rep_text = representative.get("text")
+            is_url_text = bool(
+                rep_text
+                and isinstance(rep_text, str)
+                and re.search(
+                    r'(?:https?://|www\.)\S+|docs\.google\.com/\S+|'
+                    r'^[a-zA-Z0-9-]+\.(?:com|org|net|edu|gov|io|ai|co|dev|app|in)(?:/\S*)?$',
+                    rep_text.strip(),
+                    re.IGNORECASE,
+                )
+            )
+            resolved_type = "URL" if is_url_text else representative["type"]
+            is_requires_review = (
+                False if is_url_text else (
+                    resolved_type == "UNKNOWN"
+                    or any(
+                        item.get("confidence") is None
+                        for item in members
+                    )
+                )
+            )
+
             entities.append(
                 {
                     "entity_id": f"entity_{entity_index:05d}",
-                    "type": representative["type"],
-                    "text": representative.get("text"),
+                    "type": resolved_type,
+                    "text": rep_text,
                     "sources": sources,
                     "bounding_boxes": boxes,
                     "text_spans": spans,
@@ -553,13 +579,7 @@ class EntityResolver:
                         }
                         for item in members
                     ],
-                    "requires_review": (
-                        representative["type"] == "UNKNOWN"
-                        or any(
-                            item.get("confidence") is None
-                            for item in members
-                        )
-                    ), 
+                    "requires_review": is_requires_review,
                     "parent_regions": parent_regions,
                     "effective_bounding_boxes": effective_bounding_boxes,
                 }

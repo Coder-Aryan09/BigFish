@@ -74,6 +74,7 @@ async function actNode(ctx: AgentRunContext, state: State): Promise<Partial<Stat
   // Tabs may have changed since planning or the last subtask.
   const tabs = state.current === 0 && subtask.attempts === 0 ? state.tabs : await listTabs(ctx);
   const outcome = await runSubtask(ctx, subtask.id, {
+    task: state.task,
     goal: subtask.goal,
     criteria: subtask.criteria,
     feedback: subtask.feedback,

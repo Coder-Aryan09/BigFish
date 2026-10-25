@@ -1,9 +1,9 @@
-# 🧩 BigFish Chrome Extension & Browser MCP Server
+# 🧩 BigFish Chrome Extension
 
-> Privacy-first Chrome extension that turns your browser into a secure Model Context Protocol (MCP) server with client-side PII masking and agentic UI.
+> Turns the user's own Chrome into an MCP server with 13 browser tools, and masks personal data before any page text leaves the browser.
 
 ![Version](https://img.shields.io/badge/version-0.1.0-blue)
-![Status](https://img.shields.io/badge/status-Development-brightgreen)
+![Status](https://img.shields.io/badge/status-Development-yellow)
 ![Runtime](https://img.shields.io/badge/runtime-Chrome%20MV3%20%2B%20WXT%200.21-informational)
 
 ---
@@ -22,22 +22,22 @@
 ## 🎯 Overview & The "Why"
 
 ### What this service does
-The **BigFish Extension** (`@bigfish/extension`) runs inside the user's real Chrome browser session. It acts as a local **Model Context Protocol (MCP) Server** over an encrypted WebSocket connection, exposing 13 browser automation tools (clicks, typing, snapshots, tabs, form fills) while intercepting all page text to strip sensitive PII (emails, cards, Aadhaar, phones) before any data leaves the local device.
+`@bigfish/extension` runs in the user's real Chrome. Its service worker is an MCP server with 13 browser tools (navigate, snapshot, find, click, type, fill forms, and more). It dials out to the agent server over one WebSocket. Every tool result passes through the PII filter first, and risky actions wait for the user to approve them in the side panel.
 
 ### Why this is its own microservice (not part of a monolith)
-- **Bounded context:** Owns direct access to live Chrome DOM APIs, user browser cookies, active sessions, audio hardware for voice dictation, and the local PII rehydration vault exclusively.
-- **Independent scaling need:** Scales horizontally with every user's personal workstation or laptop; zero browser execution compute load is borne by central servers.
-- **Independent deployability:** Packaged as an unpacked Chrome MV3 extension adhering to the WebExtension standard and distributed via the Chrome Web Store.
-- **Failure isolation:** If the cloud agent server experiences latency or disconnects, the user's tabs and browser state are never killed. The extension handles reconnect backoff automatically.
-- **Data isolation strategy:** Client-side local storage (`browser.storage.local`) and in-memory PII token vault; raw sensitive credentials never leave the browser sandbox.
+- **Bounded context:** the only part with access to the live DOM, the user's sign-ins, the PII vault, and the approval prompts. Raw personal values exist only here.
+- **Independent scaling need:** one per browser, running on the user's machine. Server load does not grow with page work; it grows with concurrent runs.
+- **Independent deployability:** shipped as a Chrome extension build (unpacked today, Web Store later), on a slower cadence than the server's prompts and guards.
+- **Failure isolation:** if the server goes away, browsing is not affected. The connection goes to `backoff` (full jitter, 1 s to 30 s) and comes back on its own.
+- **Data isolation strategy:** the PII vault and the JWT live in `chrome.storage.session` (memory only, gone when the browser closes). Nothing goes to the server except masked tool results.
 
 ### The "User" of this service
 
 | Caller | Call type | Why it calls this service |
 |---|---|---|
-| End User | Direct UI Interaction | Interacts with the Chrome side panel, dictates voice commands, and approves risky actions |
-| BigFish Backend Agent Server | Inbound Framed WebSocket RPC (`/mcp-ws`) | Invokes browser automation tools (`browser_click`, `browser_snapshot`, etc.) |
-| Browser Active Tabs | In-process Content Script Messaging | Injects DOM actions, accessibility tree extractors, and the visual agent cursor |
+| End user | Direct UI (side panel, approval popup) | Types or speaks a task, watches steps, approves risky actions |
+| BigFish agent server | MCP `tools/call` over `/mcp-ws` (the extension dials out) | Runs the 13 browser tools |
+| Developer tools | `/api/dev/devices/:id/tools/:name` on the server, forwarded over MCP | Calling tools by hand |
 
 ---
 
@@ -46,45 +46,58 @@ The **BigFish Extension** (`@bigfish/extension`) runs inside the user's real Chr
 ### Current state
 | Field | Value |
 |---|---|
-| **Status** | 🟢 Production-Ready Local Extension / Active Development |
+| **Status** | 🟡 Development (runs end to end on a real browser) |
 | **Version** | `0.1.0` |
-| **Last deployed** | Chrome Developer Mode / Local Build |
-| **Owner(s)** | BigFish Frontend & Security Team |
-| **Known technical debt** | Web Speech API speech-to-text requires Google server connectivity; local whisper model fallback is planned for 100% offline air-gapped dictation. |
+| **Last deployed** | Not published; load `dist/chrome-mv3` unpacked |
+| **Owner(s)** | BigFish team |
+| **Known technical debt** | Elements inside iframes are not visible to the tools. A native `alert()`/`confirm()` can block a page while a tool waits on it. Vault tokens use a simple string hash, not a keyed hash. Voice input uses the Web Speech API, which needs Google's servers. |
 
 ### Features built (working today)
-- `13 Browser Automation Tools` — Full implementation of `browser_navigate`, `browser_snapshot`, `browser_find`, `browser_click`, `browser_type`, `browser_fill_form`, `browser_select`, `browser_press_key`, `browser_scroll`, `browser_wait_for`, `browser_extract`, `browser_tabs`, and `browser_ping` — ✅ done
-- `Zero-Trust PII Redaction Vault` — Intercepts page snapshots and redacts emails, phones, PAN, Luhn-verified credit cards, and Verhoeff-verified Aadhaar numbers into deterministic salt tokens (`[CARD_XXXX]`) — ✅ done
-- `Origin-Aware Rehydration` — Allows form autofill tools to replace tokens with real values *only* on the verified originating web domain — ✅ done
-- `Visual Agent Cursor` — Renders an animated cursor directly on web pages showing live AI agent targeting — ✅ done
-- `Sidepanel Agent Workspace` — Displays real-time plan checklists, subtask step statuses, expandable tool results, and final synthesized answers — ✅ done
-- `Web Speech Voice Input` — Hands-free voice dictation with automatic speech-to-text conversion and punctuation — ✅ done
-- `Human-in-the-Loop Approvals` — Intercepts high-risk actions (financial transactions, data deletion, authentication submission) for explicit user approval — ✅ done
+- **13 browser tools** — `browser_ping`, `browser_tabs`, `browser_navigate`, `browser_snapshot`, `browser_find`, `browser_click`, `browser_type`, `browser_fill_form`, `browser_select`, `browser_press_key`, `browser_scroll`, `browser_wait_for`, `browser_extract` — ✅ done
+- **Refs and deltas** — elements get refs like `3:12`. After an action the result says what changed — ✅ done:
+  - new or removed elements
+  - changed values
+  - alerts
+  - **new text** on the page
+  - **tabs the action opened**
+- **Field context** — every field shows its question or group (`radio "2022" [ ] in "Graduation year"`), incl. Google Forms "Your answer" boxes — ✅ done
+- **Shadow DOM** — elements in open shadow roots can be found, typed into and clicked — ✅ done
+- **PII vault** — emails, phones, PAN, SSN, cards (Luhn) and Aadhaar (Verhoeff) become tokens like `[EMAIL_7F3A]`. URLs are left intact. Tokens turn back into real values only on the site they came from, and a cross-site use needs approval. Made-up tokens are refused — ✅ done
+- **Approvals** — clicks and submits labelled send, pay, buy, delete, transfer, publish and similar wait for Approve. The prompt shows in the side panel, or in a popup when the panel is closed — ✅ done
+- **Clear errors** — each comes with a hint that fits — ✅ done:
+  - error pages (404, site down)
+  - no history for back/forward
+  - covered, disabled and read-only elements
+  - malformed refs and unknown keys
+  - `select` on an element that is not a dropdown
+- **Filler args** — `null`, `""` and `false` for optional fields are dropped, from the agent and from any MCP client — ✅ done
+- **Side panel** — sign-in, live plan and steps, tool results, voice dictation, agent cursor on the page — ✅ done
 
 ### How it was built
-- **Language/runtime:** TypeScript `5.x`, Chrome Manifest V3
-- **Framework:** WXT `v0.21.4` (Next-generation Web Extension Framework) + Vite `8.3.5`
+- **Language/runtime:** TypeScript, Chrome Manifest V3 (Chrome ≥ 116)
+- **Framework:** WXT 0.21
 - **Design patterns used:**
-  - **Reverse MCP Architecture:** The extension acts as the server while the central agent acts as the client, avoiding external inbound network punch-through.
-  - **Tokenized Vault Pattern:** Replaces raw PII with deterministic HMAC hashes, ensuring the cloud LLM reasons over structured tokens without seeing sensitive credentials.
-  - **Single-Event FIFO Executor:** Serializes tool invocations per tab to prevent concurrent race conditions during DOM mutations.
-- **Key libraries:** `@modelcontextprotocol/server`, `@bigfish/contracts`, `@bigfish/mcp-ws`, `zod`
+  - **Reverse MCP:** the browser is the server and dials out, so nothing has to reach into the user's machine.
+  - **Token vault:** the model reasons over `[EMAIL_7F3A]`; the real value is filled in only on its own origin ([`privacy.ts`](safety/privacy.ts), [`pii-vault.ts`](safety/pii-vault.ts)).
+  - **Ref map with fingerprints:** a ref that went stale after a re-render is found again by role and name if it is unique ([`dom-actions.ts`](entrypoints/content/dom-actions.ts)).
+- **Key libraries:** `@modelcontextprotocol/server`, `@bigfish/contracts`, `@bigfish/mcp-ws`, `zod`; Playwright for E2E
 
 ---
 
 ## 🏗️ Architecture & Design Patterns
 
-The extension is partitioned into isolated MV3 contexts:
+The service worker owns the MCP server, the connection and the executor. The executor runs each tool, scans the page before and after, and builds the delta. It sends DOM work to the content script by message. The safety layer runs on every result and every outgoing value. The server sends one tool call at a time per device, so actions never overlap.
 
 ```
 apps/extension/
 ├── entrypoints/
-│   ├── background/        # Service worker: MCP server, WebSocket connection, tool executor
-│   ├── content/           # Content script: DOM action engine, visual agent cursor
-│   ├── sidepanel/         # Sidepanel UI: main controller, voice input, agent client
-│   └── mic-permission/    # Permission dialogue for audio recording
-├── safety/                # PII vault, action policy, URL policy, approval queue
-├── wxt.config.ts          # WXT bundler configuration
+│   ├── background/        # MCP server, connection (states, backoff), executor, snapshot and delta text, tabs
+│   ├── content/           # DOM engine (scan, refs, actions, shadow DOM), agent cursor
+│   ├── sidepanel/         # UI, agent client (SSE), voice input
+│   └── mic-permission/    # microphone permission page
+├── safety/                # PII vault, sanitize and rehydrate, action policy, approvals, URL policy
+├── e2e/                   # Playwright: bigfish, tools-edge, voice specs; agent-eval runner; harness
+├── wxt.config.ts          # output in dist/, fixed key, OAuth client
 └── package.json
 ```
 
@@ -96,62 +109,95 @@ apps/extension/
 
 | Key | Required | Description | Example (fake) |
 |---|---|---|---|
-| `WXT_SERVER_URL` | ❌ | Backend agent server WebSocket URL | `http://127.0.0.1:8787` |
-| `WXT_GOOGLE_CLIENT_ID` | ✅ | Google OAuth Client ID for identity verification | `123456789-sample.apps.googleusercontent.com` |
-| `WXT_EXTENSION_KEY` | ❌ | Fixed manifest public key for persistent extension ID | `sample-manifest-public-key` |
+| `WXT_SERVER_URL` | ❌ | Server base URL; the socket uses `ws://` on the same host (default `http://127.0.0.1:8787`) | `http://127.0.0.1:8787` |
+| `WXT_EXTENSION_KEY` | ✅ for sign-in | Public key that fixes the extension ID (never the private `.pem`) | `MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsample` |
+| `WXT_GOOGLE_CLIENT_ID` | ✅ for sign-in | Google OAuth client of type "Chrome Extension" for that ID | `123456789-sample.apps.googleusercontent.com` |
 
+Values are baked in at build time, so rebuild after changing `.env`.
 
-### Run Locally
-
-Run from monorepo root:
-
+### Run locally
 ```bash
-# Install dependencies
+# 1. Install dependencies (repo root)
 pnpm install
 
-# Build extension for Chrome MV3
+# 2. Configure environment
+cp apps/extension/.env.example apps/extension/.env
+
+# 3. Build, then load apps/extension/dist/chrome-mv3 in chrome://extensions (Developer mode → Load unpacked)
 pnpm --filter @bigfish/extension build
+#    or dev mode with reload: pnpm dev:ext
 
-# Launch Chrome in development mode with extension hot-reloading
-pnpm dev:ext
-
-# Run safety and PII unit tests
-pnpm --filter @bigfish/extension test
-
-# Playwright E2E: Chromium + built extension + server + fixture pages, incl. tool edge cases (tools-edge.spec.ts)
-pnpm --filter @bigfish/extension e2e
+# 4. Run tests
+pnpm --filter @bigfish/extension test      # safety unit tests (12)
+pnpm --filter @bigfish/extension e2e       # Playwright (31): first run `pnpm --filter @bigfish/extension exec playwright install chromium`
 
 # Agent evals: the real model on fixture pages (forms, shop, table, mail, chat). Needs the e2e build (run e2e once).
 # Traces go to test-results/agent-eval/
 NVIDIA_API_KEY=... pnpm --filter @bigfish/extension exec tsx e2e/agent-eval.ts [case...]
 ```
 
-To load manually in Chrome:
-1. Open Chrome and navigate to `chrome://extensions/`.
-2. Enable **Developer mode** (top right toggle).
-3. Click **Load unpacked** and select `apps/extension/.output/chrome-mv3` (or `dist/chrome-mv3`).
+After a rebuild, press **Reload** on the extension and reload open tabs, so they get the new content script.
+
+### Run via Docker / Skaffold
+Not applicable: this runs inside Chrome. For CI, the E2E harness starts headless Chromium with the e2e build.
 
 ---
 
-## 📡 Communication & Contracts
+## 🔌 Communication & Contracts
 
-### Outbound Connection
-- Connects to `ws://127.0.0.1:8787/mcp-ws` with single-use tickets acquired via `/api/ws-ticket`.
-- Exchanges length-prefixed protocol frames (`hello`, `ping`, `pong`, `call`, `result`, `abort`).
+### Synchronous (REST/gRPC)
+| Direction | Protocol | Endpoint / method | Counterpart |
+|---|---|---|---|
+| Outbound | HTTP | `POST /api/auth/google`, `POST /api/ws-ticket` | Agent server |
+| Outbound | WebSocket | `ws://<server>/mcp-ws?ticket=…` (JSON frames: `ctl` hello/ready/heartbeat, `mcp` JSON-RPC) | Agent server |
+| Inbound (over that socket) | MCP `tools/list`, `tools/call` | the 13 `browser_*` tools | Agent server (MCP client) |
+| Outbound | HTTP + SSE | `POST /api/agent/invoke`, `/api/agent/cancel` (side panel) | Agent server |
 
-### Inbound Tool Dispatch
-Receives tool requests validated against `@bigfish/contracts` schemas and dispatches to the active Chrome tab.
+### Asynchronous (event/queue)
+| Event | Direction | Broker / topic | Payload schema ref |
+|---|---|---|---|
+| `AgentEvent` stream | Consumes (side panel) | none (SSE) | [`agent.ts`](../../packages/contracts/src/agent.ts) |
+| `notifications/progress` | Produces (while waiting for approval or a slow page) | none (MCP over the socket) | MCP spec |
+
+### Contract source of truth
+[`packages/contracts/src/tools.ts`](../../packages/contracts/src/tools.ts) for tool schemas, [`wire.ts`](../../packages/contracts/src/wire.ts) for frames.
 
 ---
 
 ## 🛡️ Production Readiness
 
-- **Health Checks & State Machine:** The background connection exposes states (`signed_out`, `idle`, `ticket`, `connecting`, `ready`, `backoff`, `stopped`) visible in the UI header and supports internal `/healthz` and `/ready` connectivity probes.
-- **Fail-Safe Disconnects:** Any in-flight mutating tool cut off mid-execution returns `STATE_UNKNOWN` and is never blindly retried, preventing duplicate financial transactions.
-- **Zero Raw PII Leaks:** Text extracted via snapshots passes through `sanitizeObservationForModel` before serialization onto the wire.
+### Health & observability
+- **Liveness:** no `/healthz` or `/ready` (an extension has no HTTP server). The side panel shows the connection state: `signed_out`, `idle`, `ticket`, `connecting`, `mcp_init`, `ready`, `backoff`, `stopped`
+- **Readiness:** `browser_ping` through the server (`POST /api/devices/:id/ping`)
+- **Graceful shutdown:** a connection that drops mid-call makes read-only tools retry once after reconnect; tools that change the page are never retried (`STATE_UNKNOWN`)
+- **Structured logging:** ❌ console only
+- **Tracing:** ❌ none
+- **Metrics:** ❌ none
+
+### Security & compliance
+- **AuthN/AuthZ:** Google sign-in via `chrome.identity`; the server's JWT; a one-time ticket per socket; the server checks the extension's Origin
+- **CORS policy:** not applicable (the extension calls the server)
+- **Rate limiting:** one tool call at a time per device (server side)
+- **Hardening:** URL policy blocks `chrome:`, `chrome-extension:`, `edge:`, `about:`, `file:`, `data:`, `javascript:` and the Chrome Web Store; risky actions need approval; PII masked on every result; made-up tokens refused
+- **Secrets management:** `.env` holds only public values (the public key and OAuth client ID); the private key stays outside the repo
+
+### CI/CD & deployment
+- **Container:** none
+- **Orchestration:** none
+- **Pipeline:** none yet; `pnpm --filter @bigfish/extension zip` makes a store upload
+- **Rollback strategy:** load the previous build
 
 ---
 
-## 📜 Changelog & Migration State
+## 📝 Changelog & Migration State
 
-- **v0.1.0:** Implementation of 13 browser tools, WXT MV3 build, reverse MCP framed WebSocket client, PII vault, visual cursor, and voice input integration.
+| Version | Date | Change | Migration notes |
+|---|---|---|---|
+| `v0.1.0` | 2026-10-25 | Tool hardening: arg normalizer, lenient MCP schemas, field context, text and new-tab deltas, shadow DOM, find ranking, clearer errors, unknown-token check; 13 edge-case E2E tests | Rebuild, reload the extension and open tabs |
+| `v0.1.0` | 2026-10 | 13 tools, MV3 build, MCP over `/mcp-ws`, PII vault, approvals, agent cursor, voice input | none |
+
+---
+
+## 🤝 Ownership
+- **Maintainer(s):** BigFish team (see the root README)
+- **Escalation:** GitHub issues on the repo

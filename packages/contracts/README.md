@@ -1,10 +1,10 @@
-# 📦 BigFish Shared Contracts & Tool Schemas
+# 📦 BigFish Shared Contracts
 
-> Single source of truth for TypeScript interfaces, Zod runtime schemas, wire protocol framing, and browser tool definitions across BigFish.
+> The one place that defines the 13 browser tools, the wire frames, the error codes and the agent events that the server and the extension both use.
 
 ![Version](https://img.shields.io/badge/version-0.1.0-blue)
-![Status](https://img.shields.io/badge/status-Production--Ready-brightgreen)
-![Runtime](https://img.shields.io/badge/runtime-TypeScript%205%20%2B%20Zod%204-informational)
+![Status](https://img.shields.io/badge/status-Development-yellow)
+![Runtime](https://img.shields.io/badge/runtime-TypeScript%20%2B%20Zod%204-informational)
 
 ---
 
@@ -22,22 +22,22 @@
 ## 🎯 Overview & The "Why"
 
 ### What this package does
-`@bigfish/contracts` is the central contract package shared by the backend agent server, the Chrome extension, and the MCP WebSocket transport layer. It exports strict Zod schemas and inferred static TypeScript types that guarantee zero schema drift between client-side browser execution and server-side LLM cognition.
+`@bigfish/contracts` holds the Zod schemas and constants that both ends of BigFish must agree on: the input of each browser tool, the WebSocket frames, the error codes, the run limits and the `AgentEvent` stream. The extension registers its MCP tools from `TOOLS`, and the server builds the model's tool list and checks every model call against the same schemas.
 
 ### Why this is its own package (not duplicated in apps)
-- **Bounded context:** Owns type definitions, runtime input validation boundaries, wire message schemas, and error codes exclusively.
-- **Independent scaling need:** Zero runtime compute overhead; compiles to lightweight ESM/CJS type declarations imported by all monorepo workspaces.
-- **Independent deployability:** Changes to tool signatures and protocol versions are versioned and enforced across all consumers simultaneously.
-- **Failure isolation:** Malformed tool arguments or unknown action requests fail immediately at schema validation boundaries before reaching browser execution engines.
-- **Data isolation strategy:** Stateless schema definitions with zero datastore dependencies.
+- **Bounded context:** owns the shape of everything that crosses the wire. No other package defines a tool schema or a frame.
+- **Independent scaling need:** none; it is a set of schemas imported in-process.
+- **Independent deployability:** none; it is a workspace package. Its value is that the server and extension cannot drift: a schema change breaks the typecheck of both.
+- **Failure isolation:** a model call with bad arguments fails Zod validation on the server, before it reaches the browser.
+- **Data isolation strategy:** no storage.
 
 ### The "User" of this package
 
 | Consumer | Integration Type | Why it imports this package |
 |---|---|---|
-| `@bigfish/server` | In-process TypeScript import | Validates incoming tool call arguments and types outgoing `AgentEvent` streams |
-| `@bigfish/extension` | In-process TypeScript import | Implements and executes the 13 browser tools according to strict schemas |
-| `@bigfish/mcp-ws` | In-process TypeScript import | Encodes and decodes framed WebSocket wire messages |
+| `@bigfish/server` | In-process import | Tool defs for the model, `normalizeToolArgs` + Zod check of every call, error codes, `RUN_LIMITS`, `AgentEvent` |
+| `@bigfish/extension` | In-process import | Registers the MCP tools from `TOOLS`, `normalizeToolArgs` in the executor, error codes, `AgentEvent` in the side panel |
+| `@bigfish/mcp-ws` | In-process import | Frame encode/decode, handshake timeouts, close codes |
 
 ---
 
@@ -46,47 +46,44 @@
 ### Current state
 | Field | Value |
 |---|---|
-| **Status** | 🟢 Production-Ready / Active |
-| **Version** | `0.1.0` |
-| **Last deployed** | Monorepo internal workspace |
-| **Owner(s)** | BigFish Architecture Team |
-| **Known technical debt** | None. All 13 browser tools have strict Zod validation schemas. |
+| **Status** | 🟡 Development |
+| **Version** | `0.1.0` (`WIRE_VERSION` 1, `CONTRACTS_VERSION` 1) |
+| **Last deployed** | Workspace package, not published |
+| **Owner(s)** | BigFish team |
+| **Known technical debt** | Shipped as TypeScript source (`main: ./src/index.ts`), so it only works inside this workspace; publishing would need a build step. The extension's MCP layer wraps the schemas to accept `null`/`""`; the base schemas do not. |
 
 ### Features built (working today)
-- `13 Browser Tool Schemas` — Complete Zod schemas with descriptions for LLM tool calling:
-  - `browser_navigate` — URL navigation and back/forward/reload history actions
-  - `browser_snapshot` — DOM text tree, interactive element indexing, and screenshot capture
-  - `browser_find` — Natural-language fuzzy locator for interactive page elements
-  - `browser_click` — Element click with support for modifiers and coordinates
-  - `browser_type` — Text entry into input fields with optional auto-submit
-  - `browser_fill_form` — Atomic multi-field form completion
-  - `browser_select` — Dropdown and select element option selection
-  - `browser_press_key` — Raw keyboard key events (Enter, Escape, Tab, Arrows)
-  - `browser_scroll` — Directional and element-specific viewport scrolling
-  - `browser_wait_for` — Explicit condition synchronization (text appears, element removed, network idle)
-  - `browser_extract` — Structured tabular and text data scraping
-  - `browser_tabs` — Tab switching, opening, closing, and enumeration
-  - `browser_ping` — End-to-end connection latency benchmarking
-- `Wire Message Contracts` — Framing specifications for `hello`, `ping`, `pong`, `call`, `result`, `abort`, `run_task`, `cancel_run`, and `agent_event`
-- `Agent Event Stream Types` — Discriminated union types for SSE streaming (`run`, `plan`, `step`, `tool_call`, `progress`, `tool_result`, `final`, `error`)
-- `Standardized Error Enums` — Canonical codes (`STATE_UNKNOWN`, `RUN_IN_PROGRESS`, `TOOL_LIMIT`, `RATE_LIMITED`, `APPROVAL_DENIED`)
+- `TOOLS` — 13 tool contracts, each with a name, description, Zod input with per-field "when to omit" descriptions, and read-only/destructive hints — ✅ done:
+  - `browser_ping`, `browser_tabs`, `browser_navigate`, `browser_snapshot`, `browser_find`
+  - `browser_click`, `browser_type`, `browser_fill_form`, `browser_select`, `browser_press_key`
+  - `browser_scroll`, `browser_wait_for`, `browser_extract`
+- `normalizeToolArgs(name, args)` — drops filler args models send: `null`, `""`, and `false` unless the default is `true`. A `url` wins over a stray `action` — ✅ done
+- `TOOL_NAMES` — the allowlist; tools an extension reports outside it never reach the agent — ✅ done
+- Wire — `encodeMcp`, `encodeCtl`, `decodeFrame`, `WS_PATH` (`/mcp-ws`), timeouts, `MAX_FRAME_BYTES` (4 MB), `CloseCode`, `NO_RECONNECT_CODES` — ✅ done
+- Errors — `ErrorCode` for tool results (`STALE_REF`, `NOT_ACTIONABLE`, `POLICY_BLOCKED`, `LOOP`, `STATE_UNKNOWN`…), `ApiErrorCode` for HTTP, and `toolError()` for the `ERROR CODE: message Hint: …` line — ✅ done
+- Agent — `AgentEvent` union (`run`, `plan`, `step`, `tool_call`, `progress`, `tool_result`, `final`, `error`), `AgentErrorCode`, `RUN_LIMITS` (80 tool calls, 8 min, 4,000-char prompt) — ✅ done
 
 ### How it was built
-- **Language/runtime:** TypeScript `5.x`, Node.js `>=22`
-- **Key libraries:** `zod` (`v4.x`) for schema declaration and JSON schema generation for LangChain / MCP tool calling
+- **Language/runtime:** TypeScript (ESM source)
+- **Framework:** none
+- **Design patterns used:**
+  - **Schema as the contract:** Zod schemas are both the runtime check and the JSON Schema sent to models and MCP clients, so the docs a model sees are the rules the code enforces.
+- **Key libraries:** `zod` 4
 
 ---
 
 ## 🏗️ Architecture & Design Patterns
 
+Flat modules, one per concern, re-exported from `index.ts`.
+
 ```
 packages/contracts/
 ├── src/
-│   ├── agent.ts       # AgentEvent, Subtask, Plan, and streaming message contracts
-│   ├── errors.ts      # Canonical error codes and error response factories
-│   ├── index.ts       # Central barrel export
-│   ├── tools.ts       # 13 Browser tool Zod schemas and inferred types
-│   └── wire.ts        # WebSocket framed protocol definitions and constants
+│   ├── tools.ts       # TOOLS (13 schemas), normalizeToolArgs, TOOL_NAMES
+│   ├── wire.ts        # frames, encode/decode, timeouts, close codes
+│   ├── errors.ts      # ErrorCode, ApiErrorCode, toolError()
+│   ├── agent.ts       # AgentEvent, AgentErrorCode, RUN_LIMITS
+│   └── index.ts       # exports
 ├── tsconfig.json
 └── package.json
 ```
@@ -99,44 +96,92 @@ packages/contracts/
 
 | Key | Required | Description | Example (fake) |
 |---|---|---|---|
-| `NODE_ENV` | ❌ | Execution environment flag | `production` |
+| none | ❌ | This package reads no environment variables | `n/a` |
 
-### Run Locally
-
-Run from monorepo root:
-
+### Run locally
 ```bash
-# Type check contracts
+# 1. Install dependencies (repo root)
+pnpm install
+
+# 2. Configure environment
+# nothing to configure
+
+# 3. Typecheck
 pnpm --filter @bigfish/contracts typecheck
+
+# 4. Run tests (contracts are tested through the server and extension suites)
+pnpm --filter @bigfish/server test
 ```
 
-Example usage in TypeScript:
+Checking a model's tool call, as the server does:
 
 ```typescript
-import { BrowserClickArgsSchema, type BrowserClickArgs } from "@bigfish/contracts";
+import { TOOLS, normalizeToolArgs } from "@bigfish/contracts";
 
-const validatedArgs: BrowserClickArgs = BrowserClickArgsSchema.parse({
-  ref: "btn-login-01",
-  clickCount: 1,
-});
+const navigate = TOOLS.find((t) => t.name === "browser_navigate")!;
+const args = normalizeToolArgs("browser_navigate", { url: "https://example.com", action: "forward", tab: null });
+// → { url: "https://example.com" }
+const parsed = navigate.input.safeParse(args);
 ```
+
+### Run via Docker / Skaffold
+Not applicable: a library.
 
 ---
 
-## 📡 Communication & Contracts
+## 🔌 Communication & Contracts
 
-Acts as the single point of truth for inter-service communication contracts. Exports canonical constant `WS_PATH = "/mcp-ws"` and `MAX_FRAME_BYTES = 16 * 1024 * 1024` (16 MB maximum payload).
+### Synchronous (REST/gRPC)
+| Direction | Protocol | Endpoint / method | Counterpart |
+|---|---|---|---|
+| Defines | MCP `tools/call` | 13 `browser_*` inputs | Server (caller) and extension (callee) |
+| Defines | WebSocket frames | `ctl` (`hello`, `ready`, `hb`) and `mcp` | `@bigfish/mcp-ws` |
+| Defines | HTTP error body | `{ ok: false, code: ApiErrorCode, message }` | Server routes |
+
+### Asynchronous (event/queue)
+| Event | Direction | Broker / topic | Payload schema ref |
+|---|---|---|---|
+| `AgentEvent` (8 types) | Defines (server produces, side panel consumes) | SSE on `POST /api/agent/invoke` | [`agent.ts`](src/agent.ts) |
+
+### Contract source of truth
+This package. Change a tool or frame here, then run `pnpm typecheck` at the root to see every place that has to follow.
 
 ---
 
 ## 🛡️ Production Readiness
 
-- **Health Checks:** Library package; provides contract typing for downstream `/healthz` and `/ready` probes.
-- **Zero Runtime Side Effects:** Pure schema exports with zero unhandled exceptions or background intervals.
-- **Fail-Fast Validation:** Strips unexpected keys and validates constraints at the perimeter before any execution.
+### Health & observability
+- **Liveness:** no `/healthz` (a library; the server exposes `/healthz` and `/ready`)
+- **Readiness:** no `/ready` (same reason)
+- **Graceful shutdown:** not applicable
+- **Structured logging:** not applicable
+- **Tracing:** not applicable
+- **Metrics:** not applicable
+
+### Security & compliance
+- **AuthN/AuthZ:** not applicable
+- **CORS policy:** not applicable
+- **Rate limiting:** `RUN_LIMITS` sets the caps the server enforces
+- **Hardening:** Zod strips unknown keys; `decodeFrame` refuses frames over 4 MB or off-schema
+- **Secrets management:** none handled
+
+### CI/CD & deployment
+- **Container:** none
+- **Orchestration:** none
+- **Pipeline:** none yet; covered by the root `pnpm typecheck`
+- **Rollback strategy:** git revert. A breaking frame change must bump `WIRE_VERSION`; a breaking tool change must bump `CONTRACTS_VERSION`; the server then refuses an extension on another version at hello (close code `4426`)
 
 ---
 
-## 📜 Changelog & Migration State
+## 📝 Changelog & Migration State
 
-- **v0.1.0:** Canonical release defining all 13 browser tool schemas, agent events, and wire frames.
+| Version | Date | Change | Migration notes |
+|---|---|---|---|
+| `v0.1.0` | 2026-10-25 | Field descriptions on every optional tool input; `normalizeToolArgs` | none (additive) |
+| `v0.1.0` | 2026-10 | 13 tool schemas, wire frames, error codes, agent events | none |
+
+---
+
+## 🤝 Ownership
+- **Maintainer(s):** BigFish team (see the root README)
+- **Escalation:** GitHub issues on the repo

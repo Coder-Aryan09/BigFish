@@ -22,7 +22,7 @@
 ## 🎯 Overview & The "Why"
 
 ### What this service does
-The **BigFish Extension** (`@bigfish/extension`) runs inside the user's real Chrome browser session. It acts as a local **Model Context Protocol (MCP) Server** over an encrypted WebSocket connection, exposing 13 browser automation tools (clicks, typing, snapshots, tabs, form fills) while intercepting all page text to strip sensitive PII (emails, cards, Aadhaar, phones) before any data leaves the local device.
+The **BigFish Extension** (`@bigfish/extension`) runs inside the user's real Chrome browser session. It acts as a local **Model Context Protocol (MCP) Server** over an encrypted WebSocket connection, exposing 15 browser automation tools (clicks, typing, snapshots, tabs, form fills) while intercepting all page text to strip sensitive PII (emails, cards, Aadhaar, phones) before any data leaves the local device.
 
 ### Why this is its own microservice (not part of a monolith)
 - **Bounded context:** Owns direct access to live Chrome DOM APIs, user browser cookies, active sessions, audio hardware for voice dictation, and the local PII rehydration vault exclusively.
@@ -53,7 +53,9 @@ The **BigFish Extension** (`@bigfish/extension`) runs inside the user's real Chr
 | **Known technical debt** | Web Speech API speech-to-text requires Google server connectivity; local whisper model fallback is planned for 100% offline air-gapped dictation. |
 
 ### Features built (working today)
-- `13 Browser Automation Tools` — Full implementation of `browser_navigate`, `browser_snapshot`, `browser_find`, `browser_click`, `browser_type`, `browser_fill_form`, `browser_select`, `browser_press_key`, `browser_scroll`, `browser_wait_for`, `browser_extract`, `browser_tabs`, and `browser_ping` — ✅ done
+- `15 Browser Automation Tools` — Full implementation of `browser_navigate`, `browser_snapshot`, `browser_find`, `browser_click`, `browser_type`, `browser_fill_form`, `browser_select`, `browser_press_key`, `browser_scroll`, `browser_wait_for`, `browser_extract`, `browser_screenshot`, `browser_code_editor`, `browser_tabs`, and `browser_ping` — ✅ done
+- `Code editors (LeetCode)` — `browser_code_editor` reads or replaces the code in a Monaco, CodeMirror or Ace editor through the editor's own API in the page's MAIN world, so no brackets or indents double up. After a write it clicks the editor's Format button (only one labelled Format), or runs the editor's own format action, like LeetCode's "Format code" (`entrypoints/background/code-editor.ts`) — ✅ done
+- `Masked screenshots` — `browser_screenshot` captures the visible tab, gets PII boxes from the local ML daemon (`WXT_ML_URL`), stores each value in the PII vault, and paints its token over the box (`entrypoints/background/screenshot.ts`). No image is sent when the daemon is down (`ML_UNAVAILABLE`) or a spot cannot be located (`PRIVACY_BLOCKED`) — ✅ done
 - `Zero-Trust PII Redaction Vault` — Intercepts page snapshots and redacts emails, phones, PAN, Luhn-verified credit cards, and Verhoeff-verified Aadhaar numbers into deterministic salt tokens (`[CARD_XXXX]`) — ✅ done
 - `Origin-Aware Rehydration` — Allows form autofill tools to replace tokens with real values *only* on the verified originating web domain — ✅ done
 - `Visual Agent Cursor` — Renders an animated cursor directly on web pages showing live AI agent targeting — ✅ done
@@ -97,6 +99,7 @@ apps/extension/
 | Key | Required | Description | Example (fake) |
 |---|---|---|---|
 | `WXT_SERVER_URL` | ❌ | Backend agent server WebSocket URL | `http://127.0.0.1:8787` |
+| `WXT_ML_URL` | ❌ | Local ML privacy daemon that masks `browser_screenshot` images | `http://127.0.0.1:8788` |
 | `WXT_GOOGLE_CLIENT_ID` | ✅ | Google OAuth Client ID for identity verification | `123456789-sample.apps.googleusercontent.com` |
 | `WXT_EXTENSION_KEY` | ❌ | Fixed manifest public key for persistent extension ID | `sample-manifest-public-key` |
 

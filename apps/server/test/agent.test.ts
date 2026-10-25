@@ -3,7 +3,7 @@
 // tool call rules when the extension disconnects.
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, test } from "node:test";
-import { AIMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
 import { AgentErrorCode, ErrorCode, type AgentEvent } from "@bigfish/contracts";
 import { startServer } from "../src/server.js";
 import type { AgentModels, PlanOutput, Verdict } from "../src/agent/models.js";
@@ -192,6 +192,24 @@ describe("agent run", () => {
     await closeExt(ext);
   });
 
+  test("a task that asks for dummy data tells the actor and the judge to make values up", async () => {
+    script = { act: () => complete() };
+    const ext = await fake({ handlers: pageHandlers });
+    await session(ext.deviceId);
+
+    await readEvents(await invoke(ext.deviceId, "fill this form with dummy details"));
+    const brief = seen.act[0]!.map((m) => String(m.content)).join("\n");
+    assert.match(brief, /The user asked for made-up values/);
+    assert.match(seen.judge[0]!, /The user asked for made-up values/);
+
+    seen.act = [];
+    seen.judge = [];
+    await readEvents(await invoke(ext.deviceId, "fill this form"));
+    assert.doesNotMatch(seen.act[0]!.map((m) => String(m.content)).join("\n"), /The user asked for made-up values/);
+    assert.doesNotMatch(seen.judge[0]!, /The user asked for made-up values/);
+    await closeExt(ext);
+  });
+
   test("cancel stops the run and the call running in the browser", async () => {
     let aborted = false;
     script = { act: () => callTool("browser_wait_for", { text: "never" }) };
@@ -336,6 +354,66 @@ describe("agent run", () => {
 
     await readEvents(await invoke(ext.deviceId));
     assert.deepEqual(clicked, ["1:1"]);
+    await closeExt(ext);
+  });
+
+  test("a masked screenshot reaches the model as an image after the tool answers, and only the newest is kept", async () => {
+    const images = (messages: BaseMessage[]) =>
+      messages.flatMap((m) =>
+        HumanMessage.isInstance(m) && Array.isArray(m.content)
+          ? m.content.filter((b) => b.type === "image_url").map((b) => (b as unknown as { image_url: { url: string } }).image_url.url)
+          : [],
+      );
+    let shot = 0;
+    script = {
+      act: (messages, turn) => {
+        if (turn < 2) return callTool("browser_screenshot");
+        const urls = images(messages);
+        assert.deepEqual(urls, ["data:image/jpeg;base64,U0hPVDI="], "only the newest screenshot is sent");
+        const last = messages.at(-1)!;
+        assert.ok(HumanMessage.isInstance(last), "the image follows the tool answer");
+        assert.ok(ToolMessage.isInstance(messages.at(-2)!));
+        assert.match(String(messages.at(-2)!.content), /masked: \[NAME_1A2B\]/);
+        assert.ok(messages.some((m) => HumanMessage.isInstance(m) && m.content === "[old screenshot cleared]"));
+        return complete();
+      },
+    };
+    const ext = await fake({
+      handlers: {
+        ...pageHandlers,
+        browser_screenshot: () => ({
+          text: "ok screenshot [tab 1] 1280x720 | masked: [NAME_1A2B]",
+          image: { data: Buffer.from(`SHOT${++shot}`).toString("base64"), mimeType: "image/jpeg" },
+        }),
+      },
+    });
+    await session(ext.deviceId);
+
+    const events = await readEvents(await invoke(ext.deviceId));
+    assert.equal(typesOf(events).at(-1), "final");
+    const result = events.find((e) => e.type === "tool_result" && e.name === "browser_screenshot");
+    assert.ok(result && result.type === "tool_result" && !result.text.includes("U0hPV"), "no image data in events");
+    await closeExt(ext);
+  });
+
+  test("ML_UNAVAILABLE from the extension reaches the model as an error, with no image", async () => {
+    script = {
+      act: (messages, turn) => {
+        if (turn === 0) return callTool("browser_screenshot");
+        assert.match(lastToolText(messages), /^ERROR ML_UNAVAILABLE/);
+        assert.ok(!messages.some((m) => HumanMessage.isInstance(m) && Array.isArray(m.content)));
+        return complete();
+      },
+    };
+    const ext = await fake({
+      handlers: {
+        ...pageHandlers,
+        browser_screenshot: () => ({ text: "ERROR ML_UNAVAILABLE: The local ML privacy service is not running.", isError: true }),
+      },
+    });
+    await session(ext.deviceId);
+
+    await readEvents(await invoke(ext.deviceId));
     await closeExt(ext);
   });
 

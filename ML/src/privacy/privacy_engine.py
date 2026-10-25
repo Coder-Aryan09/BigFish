@@ -6,7 +6,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from privacy.session_manager import SessionManager
+from ML.src.privacy.session_manager import SessionManager
 
 class PrivacyEngine:
     """
@@ -16,11 +16,12 @@ class PrivacyEngine:
     require masking and assigns session-local entity IDs.
     """
 
-    # Canonical entity types that should be masked by default.
+    # Canonical entity types that should be masked by default: personal data only.
+    # ORGANIZATION and LOCATION stay visible, since they are mostly UI text
+    # ("Google Forms", "India") the agent needs to read. PERSON also covers
+    # people that YOLO finds in photos.
     SENSITIVE_TYPES = {
         "PERSON",
-        "ORGANIZATION",
-        "LOCATION",
         "EMAIL",
         "PHONE",
         "ADDRESS",
@@ -28,6 +29,11 @@ class PrivacyEngine:
         "DATE_OF_BIRTH",
         "FINANCIAL",
         "CREDENTIAL",
+        "AADHAAR",
+        "PAN",
+        "CREDIT_CARD",
+        "SSN",
+        "PASSWORD",
         "UNKNOWN",
     }
 
@@ -203,6 +209,10 @@ class PrivacyEngine:
             for box in boxes:
                 mask_regions.append({
                     "entity_id": privacy_id,
+                    # The resolver's ID, so a local caller can look up the
+                    # entity's text and sources. The plan itself holds no text.
+                    "resolver_entity_id": resolver_id,
+                    "category": entity_type,
                     "bbox": box,
                     "coordinate_space": entity.get("coordinate_space"),
                     "action": "mask",

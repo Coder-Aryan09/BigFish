@@ -2,7 +2,8 @@
 //   plan -> act -> verify -> (act again with feedback | next subtask | finalize)
 // State holds the subtasks and saved facts, never a growing chat history.
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
-import { runSubtask, type AgentRunContext } from "./actor.js";
+import { MADE_UP_NOTE, runSubtask, type AgentRunContext } from "./actor.js";
+import { allowsMadeUpValues } from "./personal-guard.js";
 import { callBrowserTool } from "./tool-policy.js";
 
 export interface Subtask {
@@ -105,13 +106,16 @@ async function verifyNode(ctx: AgentRunContext, state: State): Promise<Partial<S
     const verdict = await ctx.models.judge(
       [
         `User task: ${state.task}`,
+        allowsMadeUpValues(state.task) ? MADE_UP_NOTE : "",
         `Goal: ${subtask.goal}`,
         `Criteria: ${subtask.criteria}`,
         `Agent report: ${subtask.result ?? ""}`,
         `Saved facts:\n${formatNotes(state.notes) || "(none)"}`,
         `Last tool results the agent saw:\n${subtask.observations?.join("\n\n") || "(none)"}`,
         `Current page:\n${page}`,
-      ].join("\n\n"),
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
       ctx.signal,
     );
     passed = verdict.passed;

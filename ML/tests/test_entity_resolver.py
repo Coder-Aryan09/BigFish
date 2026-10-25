@@ -5,11 +5,11 @@
 from pathlib import Path
 from PIL import Image, ImageDraw
 
-from privacy.entity_resolver import EntityResolver 
-from workers.ocr import OCRDetector
-from workers.cv import CVDetector
-from workers.ner import NERDetector
-from pipeline import DetectionPipeline
+from ML.src.privacy.entity_resolver import EntityResolver
+from ML.src.workers.ocr import OCRDetector
+from ML.src.workers.cv import CVDetector
+from ML.src.workers.ner import NERDetector
+from ML.src.pipeline import DetectionPipeline
 
 
 def main():

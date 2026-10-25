@@ -1,6 +1,14 @@
 // BigFish PII Vault: Tokenizes private data before it ever leaves the browser.
 // Replaces emails, phones, Aadhaar, PAN, SSN, Credit Cards with [TYPE_XXXX] tokens.
 
+// Token kinds the vault hands out. NAME and ADDRESS come from masked screenshots.
+const TOKEN_KINDS = "EMAIL|PHONE|AADHAAR|PAN|CARD|SSN|SECRET|NAME|ADDRESS";
+
+// A fresh global regex for vault tokens like [EMAIL_7F3A].
+export function vaultTokenRegex(): RegExp {
+  return new RegExp(`\\[(${TOKEN_KINDS})_[0-9A-F]{4}\\]`, "g");
+}
+
 export interface VaultToken {
   token: string;
   type: string;
@@ -73,8 +81,7 @@ class PiiVault {
     let result = text;
     const crossOrigins: string[] = [];
 
-    const tokenRegex = /\[(EMAIL|PHONE|AADHAAR|PAN|CARD|SSN|SECRET)_[0-9A-F]{4}\]/g;
-    result = result.replace(tokenRegex, (match) => {
+    result = result.replace(vaultTokenRegex(), (match) => {
       const entry = this.tokens.get(match);
       if (!entry) return match;
       if (!entry.origins.has(currentOrigin)) {

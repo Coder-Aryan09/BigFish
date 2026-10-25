@@ -91,6 +91,9 @@ async function handle({ type, payload = {} }: Message): Promise<Record<string, u
       case "BIGFISH_WAIT_QUIET":
         return { ok: true, ...(await bigFishDOM.waitQuiet(Number(payload.quietMs ?? 800), Number(payload.timeoutMs ?? 5000))) };
 
+      case "BIGFISH_FORMAT_BUTTON":
+        return { ok: true, ...bigFishDOM.formatButton() };
+
       case "BIGFISH_CHECK":
         return { ok: true, met: bigFishDOM.check(payload) };
 

@@ -2,7 +2,7 @@
 // action policy and URL policy.
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { luhnValid, rehydrateArgs, sanitizeObservationForModel, verhoeffValid } from "./privacy.ts";
+import { luhnValid, rehydrateArgs, sanitizeObservationForModel, screenshotPlaceholder, verhoeffValid } from "./privacy.ts";
 import { classifyAction } from "./action-policy.ts";
 import { isForbiddenUrl } from "./url-policy.ts";
 
@@ -74,6 +74,34 @@ describe("rehydration", () => {
     const { args, rehydrated } = rehydrateArgs("browser_type", { text: "[EMAIL_FFFF]" }, ORIGIN);
     assert.equal(args.text, "[EMAIL_FFFF]");
     assert.equal(rehydrated, false);
+  });
+});
+
+describe("screenshot placeholders", () => {
+  test("a masked name is stored in the vault and typed back as the real value", () => {
+    const token = screenshotPlaceholder({ category: "PERSON", text: "Jane Doe", sources: ["ner"] }, ORIGIN);
+    assert.match(token, /^\[NAME_[0-9A-F]{4}\]$/);
+    const { args, rehydrated, unknown } = rehydrateArgs("browser_type", { text: `Dear ${token}` }, ORIGIN);
+    assert.equal(args.text, "Dear Jane Doe");
+    assert.equal(rehydrated, true);
+    assert.deepEqual(unknown, []);
+  });
+
+  test("the screenshot and the text filter share one token per value", () => {
+    const [fromText] = tokens(sanitizeObservationForModel("shot@example.com", ORIGIN));
+    const fromImage = screenshotPlaceholder({ category: "EMAIL", text: "shot@example.com" }, ORIGIN);
+    assert.equal(fromImage, fromText);
+  });
+
+  test("categories map to their vault kinds", () => {
+    assert.match(screenshotPlaceholder({ category: "CREDIT_CARD", text: "4111 1111 1111 1111" }, ORIGIN), /^\[CARD_/);
+    assert.match(screenshotPlaceholder({ category: "ADDRESS", text: "12 MG Road" }, ORIGIN), /^\[ADDRESS_/);
+    assert.match(screenshotPlaceholder({ category: "IDENTIFIER", text: "ZX-99" }, ORIGIN), /^\[SECRET_/);
+  });
+
+  test("spots without text get a fixed label and nothing is stored", () => {
+    assert.equal(screenshotPlaceholder({ category: "PERSON", text: null, sources: ["cv"] }, ORIGIN), "[PHOTO]");
+    assert.equal(screenshotPlaceholder({ category: "UNKNOWN", text: "  " }, ORIGIN), "[MASKED]");
   });
 });
 

@@ -30,46 +30,23 @@ from pydantic import BaseModel, Field
 from PIL import Image
 
 import sys
+import threading
+from contextlib import asynccontextmanager
 
-# Ensure BigFish repository, ML, and src directories are always in sys.path
-_current_file = Path(__file__).resolve()
-_src_dir = _current_file.parent
-_ml_dir = _src_dir.parent
-_repo_dir = _ml_dir.parent
+# The ML package is imported as ML.src.*, so the repo root must be importable
+# (e.g. under `uvicorn ML.src.server:app` started from another folder).
+_repo_dir = Path(__file__).resolve().parents[2]
+if str(_repo_dir) not in sys.path:
+    sys.path.insert(0, str(_repo_dir))
 
-for _p in [str(_repo_dir), str(_ml_dir), str(_src_dir)]:
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-# BigFish ML Pipeline modules (supports ML.src, src, and local imports)
-try:
-    from pipeline import DetectionPipeline
-    from workers.ocr import OCRDetector
-    from workers.cv import CVDetector
-    from workers.ner import NERDetector
-    from privacy.entity_resolver import EntityResolver
-    from privacy.privacy_engine import PrivacyEngine
-    from privacy.session_manager import SessionManager
-    from privacy.screenshot_sanitizer import ScreenshotSanitizer
-except (ImportError, ModuleNotFoundError):
-    try:
-        from src.pipeline import DetectionPipeline
-        from src.workers.ocr import OCRDetector
-        from src.workers.cv import CVDetector
-        from src.workers.ner import NERDetector
-        from src.privacy.entity_resolver import EntityResolver
-        from src.privacy.privacy_engine import PrivacyEngine
-        from src.privacy.session_manager import SessionManager
-        from src.privacy.screenshot_sanitizer import ScreenshotSanitizer
-    except (ImportError, ModuleNotFoundError):
-        from pipeline import DetectionPipeline
-        from workers.ocr import OCRDetector
-        from workers.cv import CVDetector
-        from workers.ner import NERDetector
-        from privacy.entity_resolver import EntityResolver
-        from privacy.privacy_engine import PrivacyEngine
-        from privacy.session_manager import SessionManager
-        from privacy.screenshot_sanitizer import ScreenshotSanitizer
+from ML.src.pipeline import DetectionPipeline
+from ML.src.workers.ocr import OCRDetector
+from ML.src.workers.cv import CVDetector
+from ML.src.workers.ner import NERDetector
+from ML.src.privacy.entity_resolver import EntityResolver
+from ML.src.privacy.privacy_engine import PrivacyEngine
+from ML.src.privacy.session_manager import SessionManager
+from ML.src.privacy.screenshot_sanitizer import ScreenshotSanitizer
 
 logging.basicConfig(
     level=logging.INFO,
@@ -77,18 +54,30 @@ logging.basicConfig(
 )
 logger = logging.getLogger("BigFish.ML.Server")
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Load the models in the background, so /healthz answers at once and the
+    # first screenshot does not wait for model load.
+    if os.environ.get("BIGFISH_ML_WARMUP", "1") != "0":
+        threading.Thread(target=_warm_up, name="bigfish-ml-warmup", daemon=True).start()
+    yield
+
+
 app = FastAPI(
     title="BigFish ML Privacy Service",
     version="0.1.0",
     description="Local computer vision & NLP privacy pipeline for autonomous browser screenshot masking",
+    lifespan=lifespan,
 )
 
+# Only the BigFish extension and local tools may call the daemon. A website the
+# user visits must not be able to send it screenshots or read its answers.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origin_regex=r"^(chrome-extension://[a-p]{32}|http://(127\.0\.0\.1|localhost)(:\d+)?)$",
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
 
 # Global lazy-initialized pipeline components
@@ -96,9 +85,25 @@ _pipeline: Optional[DetectionPipeline] = None
 _resolver: Optional[EntityResolver] = None
 _privacy_engine: Optional[PrivacyEngine] = None
 _sanitizer: Optional[ScreenshotSanitizer] = None
+# Model loading happens once, even when warm-up and a request race.
+_init_lock = threading.Lock()
+# The OCR and NER models are not safe to call from several threads at once.
+_inference_lock = threading.Lock()
+
+
+def _warm_up() -> None:
+    try:
+        get_pipeline()
+    except Exception as e:
+        logger.error(f"Model warm-up failed: {e}")
 
 
 def get_pipeline() -> tuple[DetectionPipeline, EntityResolver, PrivacyEngine, ScreenshotSanitizer]:
+    with _init_lock:
+        return _get_pipeline_locked()
+
+
+def _get_pipeline_locked() -> tuple[DetectionPipeline, EntityResolver, PrivacyEngine, ScreenshotSanitizer]:
     global _pipeline, _resolver, _privacy_engine, _sanitizer
     if _pipeline is None or _resolver is None or _privacy_engine is None or _sanitizer is None:
         logger.info("Initializing BigFish ML Pipeline (OCR, CV, NER)...")
@@ -109,6 +114,7 @@ def get_pipeline() -> tuple[DetectionPipeline, EntityResolver, PrivacyEngine, Sc
             ocr_detector=ocr,
             cv_detector=cv,
             ner_detector=ner,
+            # A failed stage is recorded, and /mask then refuses to answer.
             strict=False,
         )
         _resolver = EntityResolver(
@@ -153,6 +159,11 @@ class MaskRegion(BaseModel):
     source: str
     box: list[float] = Field(description="[x1, y1, x2, y2] absolute pixel coordinates")
     normalizedBox: Optional[dict[str, float]] = None
+    # The value under the box, so the caller can store it in its vault and
+    # draw a placeholder. Only ever sent to the local caller. None for regions
+    # without text, like a person in a photo.
+    text: Optional[str] = None
+    sources: list[str] = Field(default_factory=list)
 
 
 class MaskResponse(BaseModel):
@@ -199,6 +210,9 @@ def healthz():
 @app.get("/ready")
 def ready():
     """Readiness probe confirming ML models are initialized in memory."""
+    # Answer at once while warm-up holds the lock, instead of hanging the caller.
+    if _pipeline is None and _init_lock.locked():
+        raise HTTPException(status_code=503, detail="Models are still loading")
     try:
         get_pipeline()
         return {
@@ -208,6 +222,24 @@ def ready():
     except Exception as e:
         logger.error(f"Readiness check failed: {e}")
         raise HTTPException(status_code=503, detail=f"Models not ready: {str(e)}")
+
+
+def _detect(pipeline: DetectionPipeline, resolver: EntityResolver, engine: PrivacyEngine, image: Image.Image):
+    """Run detection, resolution and planning. Fails closed on a broken stage."""
+    with _inference_lock:
+        pipeline_result = pipeline.run(image)
+    t_detect = time.perf_counter()
+
+    if pipeline_result.get("stage_errors"):
+        # An empty result from a failed stage is not proof the image is safe.
+        failed = ", ".join(sorted(pipeline_result["stage_errors"]))
+        logger.error(f"Detection stage failed: {failed}")
+        raise HTTPException(status_code=503, detail=f"Detection stage failed: {failed}")
+
+    resolved = resolver.resolve(pipeline_result)
+    t_resolve = time.perf_counter()
+    plan = engine.build_plan(resolved)
+    return pipeline_result, resolved, plan, t_detect, t_resolve
 
 
 def _decode_image(image_input: str) -> Image.Image:
@@ -236,17 +268,10 @@ def compute_mask_regions(request: MaskRequest):
 
     t_decode = time.perf_counter()
 
-    # Run detection pipeline
-    pipeline_result = pipeline.run(image)
-    t_detect = time.perf_counter()
-
-    # Resolve entities
-    resolved = resolver.resolve(pipeline_result)
-    t_resolve = time.perf_counter()
-
-    # Generate privacy plan
-    plan = engine.build_plan(resolved)
+    pipeline_result, resolved, plan, t_detect, t_resolve = _detect(pipeline, resolver, engine, image)
     t_plan = time.perf_counter()
+
+    entities = {e.get("entity_id"): e for e in resolved.get("entities", [])}
 
     # Construct response regions
     regions: list[MaskRegion] = []
@@ -260,6 +285,8 @@ def compute_mask_regions(request: MaskRequest):
             "width": round((x2 - x1) / width, 4) if width > 0 else 0.0,
             "height": round((y2 - y1) / height, 4) if height > 0 else 0.0,
         }
+        entity = entities.get(r.get("resolver_entity_id"), {})
+        text = entity.get("text")
         regions.append(
             MaskRegion(
                 id=r.get("entity_id", f"region_{idx:03d}"),
@@ -268,6 +295,8 @@ def compute_mask_regions(request: MaskRequest):
                 source="pipeline",
                 box=[float(v) for v in bbox],
                 normalizedBox=norm_box,
+                text=str(text) if text else None,
+                sources=list(entity.get("sources", [])),
             )
         )
 
@@ -307,33 +336,26 @@ def sanitize_screenshot(request: SanitizeRequest):
     plan = request.plan
     if plan is None:
         # Generate plan automatically if not provided
-        pipeline_result = pipeline.run(image)
-        resolved = resolver.resolve(pipeline_result)
-        plan = engine.build_plan(resolved)
+        _, _, plan, _, _ = _detect(pipeline, resolver, engine, image)
 
-    # Save to temp files to run the sanitizer
-    tmp_in = Path("temp_input.png")
-    tmp_out = Path("temp_sanitized.png")
+    # In memory only: the screenshot is never written to disk.
     try:
-        image.save(tmp_in, format="PNG")
-        res = sanitizer.sanitize(tmp_in, plan, tmp_out)
+        masked, res = sanitizer.apply(image, plan)
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=422, detail=f"Sanitization refused: {e}")
 
-        with open(tmp_out, "rb") as f:
-            encoded_out = base64.b64encode(f.read()).decode("utf-8")
+    buf = io.BytesIO()
+    masked.save(buf, format="PNG")
+    encoded_out = base64.b64encode(buf.getvalue()).decode("utf-8")
 
-        return SanitizeResponse(
-            requestId=request.requestId or f"bf-req-{uuid4().hex[:12]}",
-            sanitizedImage=f"data:image/png;base64,{encoded_out}",
-            imageWidth=res["image_width"],
-            imageHeight=res["image_height"],
-            maskCount=res["mask_count"],
-            maskedEntityIds=res["masked_entity_ids"],
-        )
-    finally:
-        if tmp_in.exists():
-            tmp_in.unlink()
-        if tmp_out.exists():
-            tmp_out.unlink()
+    return SanitizeResponse(
+        requestId=request.requestId or f"bf-req-{uuid4().hex[:12]}",
+        sanitizedImage=f"data:image/png;base64,{encoded_out}",
+        imageWidth=res["image_width"],
+        imageHeight=res["image_height"],
+        maskCount=res["mask_count"],
+        maskedEntityIds=res["masked_entity_ids"],
+    )
 
 
 def main():

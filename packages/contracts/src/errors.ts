@@ -20,6 +20,10 @@ export const ErrorCode = {
   UNKNOWN_TOOL: "UNKNOWN_TOOL",
   STATE_UNKNOWN: "STATE_UNKNOWN",
   LOOP: "LOOP",
+  // The local ML privacy daemon is not running or not ready.
+  ML_UNAVAILABLE: "ML_UNAVAILABLE",
+  // A screenshot could not be fully masked, so it was not sent.
+  PRIVACY_BLOCKED: "PRIVACY_BLOCKED",
 } as const;
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
 

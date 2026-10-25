@@ -9,10 +9,18 @@ import { fileURLToPath } from "node:url";
 import { chromium, type BrowserContext, type Page, type Worker } from "@playwright/test";
 
 export const E2E_SERVER_PORT = 8799;
+// Where the e2e build looks for the ML privacy daemon (a stub, or the real one).
+export const E2E_ML_PORT = 8798;
 
 const EXTENSION_DIR = fileURLToPath(new URL("../dist/chrome-mv3-e2e", import.meta.url));
 const SERVER_DIR = fileURLToPath(new URL("../../server", import.meta.url));
 const FIXTURES_DIR = fileURLToPath(new URL("../../server/fixtures/", import.meta.url));
+
+export interface ToolOutput {
+  ok: boolean;
+  text: string;
+  image?: { data: string; mimeType: string };
+}
 
 export interface Harness {
   context: BrowserContext;
@@ -21,7 +29,7 @@ export interface Harness {
   extensionId: string;
   serverUrl: string;
   fixtureUrl: (name: string) => string;
-  callTool: (name: string, args?: Record<string, unknown>) => Promise<{ ok: boolean; text: string }>;
+  callTool: (name: string, args?: Record<string, unknown>) => Promise<ToolOutput>;
   close: () => Promise<void>;
 }
 
@@ -55,8 +63,18 @@ export async function startHarness(opts: { serverEnv?: Record<string, string> } 
         headers: { "content-type": "application/json" },
         body: JSON.stringify(args),
       });
-      const body = (await res.json()) as { ok: boolean; content?: { text?: string }[]; message?: string };
-      return { ok: body.ok, text: body.content?.map((c) => c.text ?? "").join("\n") ?? body.message ?? "" };
+      const body = (await res.json()) as {
+        ok: boolean;
+        content?: { type: string; text?: string; data?: string; mimeType?: string }[];
+        message?: string;
+      };
+      const texts = body.content?.filter((c) => c.type === "text");
+      const image = body.content?.find((c) => c.type === "image");
+      return {
+        ok: body.ok,
+        text: texts?.map((c) => c.text ?? "").join("\n") ?? body.message ?? "",
+        ...(image ? { image: { data: image.data ?? "", mimeType: image.mimeType ?? "" } } : {}),
+      };
     };
 
     return {

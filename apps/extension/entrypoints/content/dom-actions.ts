@@ -83,6 +83,11 @@ const HEADING_SELECTOR = "[role='heading'], h1, h2, h3, h4, h5, h6, legend, labe
 // A container with more fields than this is a whole form, not one question.
 const GROUP_MAX_FIELDS = 12;
 const GROUP_MAX_DEPTH = 8;
+const CODE_EDITOR_SELECTOR = ".monaco-editor, .cm-editor, .CodeMirror, .ace_editor";
+// Only a button that says "format" counts. Unlabelled icon buttons next to an
+// editor can wipe the code (LeetCode's "Retrieve last submitted code").
+const FORMAT_LABEL = /^(auto[- ]?)?(format|beautify|prettify)( code| document)?\b/i;
+const FORMAT_MAX_DEPTH = 8;
 
 export class BigFishDOMEngine {
   private readonly elementMap = new Map<string, HTMLElement>();
@@ -623,6 +628,30 @@ export class BigFishDOMEngine {
     return { ok: true, moved: Math.round(after - before), position: Math.round(after), height: box ? box.scrollHeight : document.documentElement.scrollHeight };
   }
 
+  // The Format button of the biggest code editor, looked for in the editor's
+  // containers from the nearest out. Returns a ref for BIGFISH_CLICK, or null.
+  formatButton(): { ref: string; name: string } | null {
+    const editor = deepQueryAll(document, CODE_EDITOR_SELECTOR)
+      .filter((el) => this.isVisible(el))
+      .sort((a, b) => area(b) - area(a))[0];
+    let node = editor?.parentElement;
+    for (let depth = 0; node && depth < FORMAT_MAX_DEPTH; depth++, node = node.parentElement) {
+      const button = deepQueryAll(node, "button, [role='button']").find((el) => {
+        if (editor!.contains(el) || !this.isVisible(el) || (el as HTMLButtonElement).disabled) return false;
+        const labels = [this.getAccessibleName(el), el.getAttribute("data-tooltip"), el.getAttribute("data-original-title"), el.getAttribute("data-tip")];
+        return labels.some((l) => FORMAT_LABEL.test((l ?? "").trim()));
+      });
+      if (button) {
+        const ref = this.refFor(button);
+        const name = this.getAccessibleName(button);
+        this.elementMap.set(ref, button);
+        this.fingerprintMap.set(ref, { role: this.getRole(button), name, tag: button.tagName.toLowerCase(), css: this.computeCssSelector(button) });
+        return { ref, name: name || "Format" };
+      }
+    }
+    return null;
+  }
+
   // ---- find / check / extract ----------------------------------------------------------
 
   find(query: string, kind: "element" | "text"): string[] {
@@ -738,6 +767,11 @@ export class BigFishDOMEngine {
     const kept = body.filter(keep).slice(0, max);
     return `ok table ${kept.length} rows\n${[header ?? "", ...kept].join("\n")}`;
   }
+}
+
+function area(el: Element): number {
+  const r = el.getBoundingClientRect();
+  return r.width * r.height;
 }
 
 function sleep(ms: number): Promise<void> {

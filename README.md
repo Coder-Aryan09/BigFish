@@ -66,7 +66,7 @@ BIGFISH DISTRIBUTED ARCHITECTURE (< 480 ms per turn | Zero-Trust Local Masking)
 
 | Tier | Subsystem | Key Pattern | Interface / Transport | Hit Latency | File Reference | Primary Responsibility |
 |---|---|---|---|---|---|---|
-| **Tier 1** | **Client Perception** | Reverse MCP Server | Chrome MV3 Background | `< 1 ms` | [`apps/extension`](file:///apps/extension/entrypoints/background/mcp/server.ts) | Exposes 13 browser automation tools over framed WebSocket |
+| **Tier 1** | **Client Perception** | Reverse MCP Server | Chrome MV3 Background | `< 1 ms` | [`apps/extension`](file:///apps/extension/entrypoints/background/mcp/server.ts) | Exposes 15 browser automation tools over framed WebSocket |
 | **Tier 2** | **PII Shield** | Salted Token Vault | In-Memory Crypto Vault | `< 2 ms` | [`apps/extension/safety`](file:///apps/extension/safety/privacy.ts) | Verhoeff/Luhn checksum validation and deterministic tokenization |
 | **Tier 3** | **Transport** | Framed WebSocket | Length-Prefixed Binary | `< 8 ms` | [`packages/mcp-ws`](file:///packages/mcp-ws/src/framed-transport.ts) | Isomorphic length-prefixed framing with ping/pong heartbeats |
 | **Tier 4** | **Cognitive Engine** | LangGraph State Machine | Node.js 22 + Hono | `< 450 ms` | [`apps/server`](file:///apps/server/src/agent/graph.ts) | Plans, executes, judges, and self-corrects browser actions |
@@ -139,7 +139,7 @@ flowchart TD
         DOM["Live Chrome Tab DOM"] <--> ContentScript["Content Script (apps/extension)<br/>DOM Actions & Visual Agent Cursor"]
         ContentScript <--> SafetyEngine["Safety & PII Vault<br/>Luhn / Verhoeff / Salt Hash"]
         
-        BackgroundWorker["Background Service Worker<br/>MCP Server Host (13 Tools)"] <--> SafetyEngine
+        BackgroundWorker["Background Service Worker<br/>MCP Server Host (14 Tools)"] <--> SafetyEngine
         BackgroundWorker <--> ClientWS
     end
 
@@ -178,7 +178,7 @@ flowchart TD
 2. **Ticket Authentication:** Extension acquires a single-use 60-second cryptographic ticket from `/api/ws-ticket` and connects to `/mcp-ws`.
 3. **Plan Generation:** LangGraph compiles a multi-step execution plan via Mistral AI and streams subtask goals to the user UI.
 4. **Tool Dispatch:** The agent requests a browser action (e.g., `browser_snapshot`).
-5. **PII Redaction:** The extension inspects the snapshot, passes raw pixels to the ML Privacy Daemon on port 8788, redacts all personal entities, and returns normalized coordinates.
+5. **PII Redaction:** For `browser_screenshot`, the extension sends the captured pixels to the ML Privacy Daemon on port 8788, which returns the boxes and values of personal entities. The extension stores each value in the PII vault and paints its token (like `[NAME_1A2B]`) over the box, so the model sees the token and can type it back.
 6. **Execution & Cursor Tracking:** The extension dispatches the tool to the active tab, rendering the animated visual cursor at the target coordinates.
 7. **Judge Verification:** The secondary verifier LLM evaluates action outcomes, retrying with feedback if unfulfilled, until finalizing the answer.
 
@@ -186,7 +186,7 @@ flowchart TD
 
 ## 🔬 5. Deep-Tech & Grounding Pipeline
 
-### The 13 Verified Browser Automation Tools
+### The 15 Verified Browser Automation Tools
 
 | Tool Name | Key Arguments | Safety & Policy Boundary | Primary Function |
 |---|---|---|---|
@@ -201,6 +201,8 @@ flowchart TD
 | `browser_scroll` | `direction` (`up`, `down`), `amount` | Viewport bounding | Scrolls document or targeted scrollable container |
 | `browser_wait_for` | `text`, `gone_text`, `url_contains` | Max timeout 10 seconds | Synchronizes asynchronous page loading states |
 | `browser_extract` | `what` (`table`, `list`, `article`) | Read-only | Extracts clean structured content from the DOM |
+| `browser_screenshot` | `tab` | Fails closed: no image unless the local ML daemon masked every private spot | Visible-page screenshot with PII replaced by vault tokens like `[EMAIL_7F3A]` |
+| `browser_code_editor` | `action` (`read`, `write`), `code`, `format` | Clicks only a button labelled Format, else runs the editor's own format action | Reads or replaces code in Monaco (LeetCode), CodeMirror or Ace through the editor API, then formats it |
 | `browser_tabs` | `action` (`list`, `switch`, `new`, `close`)| Enforces user ownership | Manages open browser tabs and window contexts |
 | `browser_ping` | None | Read-only | Measures round-trip framed WebSocket transport latency |
 

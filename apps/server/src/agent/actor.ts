@@ -5,7 +5,7 @@ import { ErrorCode, TOOLS, toolError, type AgentEvent } from "@bigfish/contracts
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
 import type { AgentModels } from "./models.js";
 import { LoopGuard } from "./loop-guard.js";
-import { checkPersonalValues } from "./personal-guard.js";
+import { allowsMadeUpValues, checkPersonalValues } from "./personal-guard.js";
 import { ACTOR_PROMPT } from "./prompts.js";
 import { callBrowserTool, isReadOnlyTool, type ToolCallContext } from "./tool-policy.js";
 import { agentToolDefs, isControlTool, parseToolArgs } from "./tools.js";
@@ -57,6 +57,7 @@ const OBSERVATION_CHARS = 1_000;
 export async function runSubtask(ctx: AgentRunContext, subtaskId: number, input: SubtaskInput): Promise<SubtaskOutcome> {
   const session = ctx.registry.get(ctx.userId, ctx.deviceId);
   const deviceTools = new Set(session?.tools.map((t) => t.name) ?? TOOLS.map((t) => t.name));
+  if (ctx.models.vision === false) deviceTools.delete("browser_screenshot");
   const model = ctx.models.act(agentToolDefs(deviceTools));
   const guard = new LoopGuard();
   const notes = { ...input.notes };
@@ -97,6 +98,8 @@ export async function runSubtask(ctx: AgentRunContext, subtaskId: number, input:
 
     let outcome: Pick<SubtaskOutcome, "status" | "result"> | null = null;
     let acted = false;
+    // Screenshots go in after every tool answer: a user message between tool answers is rejected.
+    const screenshots: HumanMessage[] = [];
     for (const call of calls) {
       const id = call.id ?? `call_${messages.length}`;
       const answer = (content: string) => messages.push(new ToolMessage({ content, tool_call_id: id, name: call.name }));
@@ -154,15 +157,34 @@ export async function runSubtask(ctx: AgentRunContext, subtaskId: number, input:
       const result = await callBrowserTool(ctx, call.name, args, id);
       ctx.emit({ type: "tool_result", toolCallId: id, name: call.name, ok: result.ok, text: result.text.slice(0, EVENT_TEXT_LIMIT) });
       answer(result.text);
+      if (result.image) screenshots.push(screenshotMessage(result.image));
       seen.push(result.text);
       guard.record(call.name, args, result.ok);
       observations.push(`${call.name}: ${result.text.slice(0, OBSERVATION_CHARS)}`);
       if (!isReadOnlyTool(call.name)) acted = true;
     }
 
+    messages.push(...screenshots);
     if (outcome) return end(outcome);
   }
 }
+
+// OpenAI-compatible APIs take images only in user messages, not in tool answers.
+function screenshotMessage(image: { data: string; mimeType: string }): HumanMessage {
+  return new HumanMessage({
+    content: [
+      { type: "text", text: "<page untrusted>\nThe browser_screenshot image. Labels like [NAME_1A2B] are private data hidden by BigFish.\n</page>" },
+      { type: "image_url", image_url: { url: `data:${image.mimeType};base64,${image.data}` } },
+    ],
+  });
+}
+
+function isScreenshot(message: BaseMessage): boolean {
+  return HumanMessage.isInstance(message) && Array.isArray(message.content) && message.content.some((block) => block.type === "image_url");
+}
+
+export const MADE_UP_NOTE =
+  "The user asked for made-up values. For every field or input the user gave no value for, make up a realistic sample value (e.g. Rahul Sharma, rahul.sharma@example.com). Do not ask for real details.";
 
 function subtaskBrief(input: SubtaskInput): string {
   const notes = Object.entries(input.notes);
@@ -170,6 +192,7 @@ function subtaskBrief(input: SubtaskInput): string {
     `User task (context for links and values; do only the subtask below):\n${input.task}`,
     `Subtask goal: ${input.goal}`,
     `Done when: ${input.criteria}`,
+    allowsMadeUpValues(input.task) ? MADE_UP_NOTE : "",
     input.feedback ? `Previous attempt was not accepted: ${input.feedback}` : "",
     notes.length ? `Facts saved so far:\n${notes.map(([k, v]) => `- ${k}: ${v}`).join("\n")}` : "",
     `Open tabs:\n${input.tabs}`,
@@ -180,18 +203,23 @@ function subtaskBrief(input: SubtaskInput): string {
 
 // Keeps the last KEEP_FULL_RESULTS browser results. Older ones become a stub,
 // since the page has changed since then anyway. The last snapshot is kept too:
-// it is the ref list the model is still acting on.
+// it is the ref list the model is still acting on. Only the newest screenshot
+// is kept, since each one costs many tokens.
 function clearOldResults(messages: BaseMessage[]): BaseMessage[] {
   const browserResults = messages.filter((m) => ToolMessage.isInstance(m) && m.name && !isControlTool(m.name));
   const stale = new Set(browserResults.slice(0, -KEEP_FULL_RESULTS));
   const lastSnapshot = browserResults.findLast((m) => ToolMessage.isInstance(m) && m.name === "browser_snapshot");
   if (lastSnapshot) stale.delete(lastSnapshot);
+  const screenshots = messages.filter(isScreenshot);
+  for (const old of screenshots.slice(0, -1)) stale.add(old);
   if (stale.size === 0) return messages;
-  return messages.map((m) =>
-    stale.has(m) && ToolMessage.isInstance(m)
-      ? new ToolMessage({ content: "[old result cleared; values you saved with save_fact are kept]", tool_call_id: m.tool_call_id, name: m.name })
-      : m,
-  );
+  return messages.map((m) => {
+    if (!stale.has(m)) return m;
+    if (ToolMessage.isInstance(m)) {
+      return new ToolMessage({ content: "[old result cleared; values you saved with save_fact are kept]", tool_call_id: m.tool_call_id, name: m.name });
+    }
+    return new HumanMessage("[old screenshot cleared]");
+  });
 }
 
 function textOf(message: AIMessage): string {

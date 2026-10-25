@@ -35,8 +35,8 @@ The **BigFish ML Privacy Service** (`BigFish/ML/`) is a standalone, local percep
 
 | Caller | Call type | Why it calls this service |
 |---|---|---|
-| BigFish Chrome Extension Background | Sync HTTP POST (`/v1/privacy/mask`) | Sends viewport screenshots to compute normalized bounding box coordinates for client-side canvas masking |
-| BigFish Backend Agent Server | Sync HTTP POST (`/v1/privacy/sanitize`) | Sends screenshot buffers to receive visually redacted images with blacked-out PII boxes |
+| BigFish Chrome Extension Background | Sync HTTP POST (`/v1/privacy/mask`) | `browser_screenshot` sends the captured tab and gets back each private spot's box, category and value. The extension stores the value in its PII vault and paints the token over the box (`apps/extension/entrypoints/background/screenshot.ts`) |
+| Tests and developers | Sync HTTP POST (`/v1/privacy/sanitize`) | Blacked-out image made by the daemon itself. No BigFish app calls it; the extension paints vault tokens instead |
 | Local Process Health Monitors | Sync HTTP GET (`/healthz`, `/ready`) | Verifies Python daemon liveness and model initialization readiness |
 
 ---
@@ -50,13 +50,15 @@ The **BigFish ML Privacy Service** (`BigFish/ML/`) is a standalone, local percep
 | **Version** | `0.1.0` |
 | **Last deployed** | Local Daemon (`127.0.0.1:8788`) |
 | **Owner(s)** | BigFish Machine Learning & Privacy Team |
-| **Known technical debt** | Custom YOLO weights (`yolo26s.pt`) fall back to standard `yolov8n.pt` when custom UI fine-tuned weights are absent. Deterministic Indian PII validators (Verhoeff for Aadhaar, Luhn for cards) currently run in the extension safety layer and are planned for Python-side porting. |
+| **Known technical debt** | Custom YOLO weights (`yolo26s.pt`) fall back to standard `yolov8n.pt` when custom UI fine-tuned weights are absent. The user must start the daemon (`pnpm dev:ml`); Chrome does not start it yet (a Native Messaging host could). Span boxes are estimated from character counts inside the OCR line box. |
 
 ### Features built (working today)
 - `GET /healthz` — Lightweight daemon liveness probe returning service status — ✅ done
 - `GET /ready` — Readiness probe verifying PaddleOCR, YOLO, and BERT-NER models are loaded in memory — ✅ done
-- `POST /v1/privacy/mask` — End-to-end detection pipeline taking base64 screenshots and returning normalized `[0..1]` bounding box mask coordinates — ✅ done
-- `POST /v1/privacy/sanitize` — End-to-end visual image redaction applying solid blackout rectangles over sensitive entities — ✅ done
+- `POST /v1/privacy/mask` — End-to-end detection pipeline taking base64 screenshots and returning each private spot's box, normalized `[0..1]` box, category and value. Answers 503 when a model stage failed, so the caller never treats a broken run as "nothing private" — ✅ done
+- `Regex PII Worker` — Emails, phones, PAN, SSN, Aadhaar (Verhoeff) and cards (Luhn) on each OCR line, same patterns as `apps/extension/safety/privacy.ts` (`workers/pii_regex.py`) — ✅ done
+- `Mask policy` — Only personal data is masked: PERSON (NER names and YOLO people in photos), EMAIL, PHONE, ADDRESS, AADHAAR, PAN, CREDIT_CARD, SSN, PASSWORD and other IDs. Plain OCR text, organizations, places and URLs stay readable — ✅ done
+- `POST /v1/privacy/sanitize` — End-to-end visual image redaction applying solid blackout rectangles over sensitive entities, in memory only (nothing is written to disk) — ✅ done
 - `PaddleOCR Worker` — PP-OCRv5/v4 neural text detection and recognition on raw image buffers — ✅ done
 - `BERT-NER Worker` — Hugging Face `dslim/bert-base-NER` transformer token classification identifying `PER`, `LOC`, `ORG`, and `MISC` — ✅ done
 - `YOLO CV Worker` — Ultralytics object detection identifying visual UI elements and profile pictures — ✅ done
@@ -115,6 +117,7 @@ BigFish/ML/
 |---|---|---|---|
 | `BIGFISH_ML_PORT` | ❌ | Port the HTTP daemon listens on (defaults to 8788) | `8788` |
 | `BIGFISH_ML_HOST` | ❌ | Bind interface (defaults to 127.0.0.1 for local isolation) | `127.0.0.1` |
+| `BIGFISH_ML_WARMUP` | ❌ | `0` skips loading the models at startup (they load on the first request) | `1` |
 | `PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK` | ❌ | Disables slow model hoster connectivity checks on startup | `True` |
 
 ### Run Locally
@@ -126,16 +129,20 @@ Run from `BigFish/` repository root:
 pnpm dev:ml
 
 # Or using uv directly
-uv --directory ML run python -m ML.src.server
+# (--project keeps the repo root as the working folder, so `ML.src` imports)
+uv --project ML run python -m ML.src.server
 
-# Or using uvicorn directly
+# Or using uvicorn directly (Windows PowerShell path shown; on macOS/Linux use ML/.venv/bin/uvicorn)
 & "ML\.venv\Scripts\uvicorn.exe" ML.src.server:app --host 127.0.0.1 --port 8788 --reload
 
 # Run comprehensive end-to-end network test
-uv --directory ML run python ML/tests/test_e2e_full.py
+uv --project ML run python ML/tests/test_e2e_full.py
 
-# Run complete pytest test suite
-uv --directory ML run pytest ML/tests -v
+# Run complete pytest test suite (test_pii_masking.py needs no model weights)
+uv --project ML run pytest ML/tests -v
+
+# Extension e2e with this daemon: capture, mask, then OCR the result again
+BIGFISH_E2E_ML=1 pnpm --filter @bigfish/extension exec playwright test e2e/screenshot.spec.ts
 ```
 
 ---
@@ -144,9 +151,10 @@ uv --directory ML run pytest ML/tests -v
 
 ### Inbound Endpoints
 - `GET /healthz` — Returns `{ "status": "ok", "service": "bigfish-ml", "time": 1792890870.74 }`
-- `GET /ready` — Returns `{ "status": "ready", "models_loaded": ["paddleocr", "yolov8", "bert_base_ner"] }`
+- `GET /ready` — Returns `{ "status": "ready", "models_loaded": ["paddleocr", "yolov8", "bert_base_ner"] }`. Models load in the background at startup (`BIGFISH_ML_WARMUP=0` turns that off); until then it answers 503
 - `POST /v1/privacy/mask` — Body: `{ image: "data:image/png;base64,...", dpr: 1.0, viewport: {...} }`
-  - Returns normalized bounding boxes: `[{ id, category, confidence, box: [x1, y1, x2, y2], normalizedBox: { x, y, width, height } }]`
+  - Returns `{ regions: [{ id, category, confidence, box: [x1, y1, x2, y2], normalizedBox: { x, y, width, height }, text, sources }], readyForRelease, ... }`
+  - `text` is the value under the box (null for a person in a photo). It only goes to the local caller, which keeps it in the PII vault. `readyForRelease: false` means something private could not be located; the extension then sends no image
 - `POST /v1/privacy/sanitize` — Body: `{ image: "data:image/png;base64,...", plan?: {...} }`
   - Returns sanitized image: `{ sanitizedImage: "data:image/png;base64,...", maskCount: 15, maskedEntityIds: [...] }`
 
@@ -157,6 +165,7 @@ uv --directory ML run pytest ML/tests -v
 - **Health & Readiness Probes:** Provides both `/healthz` (liveness) and `/ready` (weights loaded) endpoints.
 - **Pixel-Level Redaction Verification:** Validated via automated tests asserting that coordinates marked as sensitive have exact RGB `(0, 0, 0)` blackout values while surrounding layout context remains unmodified RGB `(255, 255, 255)`.
 - **Local Loopback Security:** Binds strictly to `127.0.0.1`, preventing external network access to memory buffers.
+- **CORS:** Only `chrome-extension://` origins and localhost pages may call the daemon, so a website the user visits cannot send it screenshots or read its answers.
 
 ---
 

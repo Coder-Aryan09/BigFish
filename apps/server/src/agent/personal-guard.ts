@@ -9,8 +9,10 @@ import { ErrorCode, toolError } from "@bigfish/contracts";
 // Field labels that ask for the user's own details. "name of the hackathon" is not one.
 const PERSONAL_LABEL =
   /\b(your name|full name|first name|last name|surname|name\b(?!\s+of)|e-?mail|phone|mobile|whatsapp|contact number|address|pin ?code|zip|date of birth|dob|birthday|age|roll (no|number)|enrol?ment|student id|employee id|aadhaa?r|pan\b|passport)/i;
-// The user allowed made-up values.
-const MADE_UP_ALLOWED = /\b(random|fake|dummy|sample|test data|made[- ]up|make up|any name|any email|any phone)\b/i;
+// The user allowed made-up values ("fill it with dummy data", "use a fake email").
+// Voice input can give Devanagari, where \b does not work, so that part has no \b.
+const MADE_UP_ALLOWED =
+  /\b(random|fake|dummy|sample|mock|placeholder|fictional|fictitious|made[- ]up|make (it |them |something |one )?up|invent|test (data|details|values|info|user|account|name|email|phone)|any (name|email|phone|details|values?|data)|kuch bhi)\b|डमी|फेक|नकली|कुछ भी/i;
 // Lines like `2:14 textbox "Full name *" ="" in "Contact"`.
 const ELEMENT_LINE = /^\*?(\d+:\d+) (\w+) "([^"]*)"(?:.*? in "([^"]*)")?/;
 
@@ -20,10 +22,16 @@ export interface GuardContext {
   results: string[];
 }
 
+// True when the user asked for made-up values. Then nothing is refused, and the
+// actor and the judge are told so too, for any task, not only forms.
+export function allowsMadeUpValues(task: string): boolean {
+  return MADE_UP_ALLOWED.test(task);
+}
+
 // Returns an ERROR line when a personal field gets a value nobody gave, else null.
 export function checkPersonalValues(tool: string, args: Record<string, unknown>, ctx: GuardContext): string | null {
   const fields = fieldsOf(tool, args);
-  if (fields.length === 0 || MADE_UP_ALLOWED.test(ctx.task)) return null;
+  if (fields.length === 0 || allowsMadeUpValues(ctx.task)) return null;
   const labels = labelsByRef(ctx.results);
   const given = [ctx.task, ...ctx.results].join("\n");
   const missing = fields

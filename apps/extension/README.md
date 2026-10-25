@@ -117,6 +117,13 @@ pnpm dev:ext
 
 # Run safety and PII unit tests
 pnpm --filter @bigfish/extension test
+
+# Playwright E2E: Chromium + built extension + server + fixture pages, incl. tool edge cases (tools-edge.spec.ts)
+pnpm --filter @bigfish/extension e2e
+
+# Agent evals: the real model on fixture pages (forms, shop, table, mail, chat). Needs the e2e build (run e2e once).
+# Traces go to test-results/agent-eval/
+NVIDIA_API_KEY=... pnpm --filter @bigfish/extension exec tsx e2e/agent-eval.ts [case...]
 ```
 
 To load manually in Chrome:

@@ -14,6 +14,9 @@ export interface Subtask {
   result?: string;
   feedback?: string;
   observations?: string[];
+  // The agent's report from each attempt, so a retry and the final answer know
+  // what an earlier attempt already did (e.g. a form it submitted).
+  reports?: string[];
 }
 
 // Tries per subtask, including the first one.
@@ -86,6 +89,7 @@ async function actNode(ctx: AgentRunContext, state: State): Promise<Partial<Stat
     status: outcome.status,
     result: outcome.result,
     observations: outcome.observations,
+    reports: [...(subtask.reports ?? []), outcome.result],
     attempts: subtask.attempts + 1,
   };
   return { subtasks: replaceAt(state.subtasks, state.current, updated), notes: outcome.notes };
@@ -97,14 +101,16 @@ async function verifyNode(ctx: AgentRunContext, state: State): Promise<Partial<S
   let reason = subtask.result ?? "";
 
   if (subtask.status === "done") {
-    const page = await callBrowserTool(ctx, "browser_snapshot", { mode: "text", max_chars: VERIFY_SNAPSHOT_CHARS, from_end: true }, `verify_${subtask.id}_${subtask.attempts}`);
+    const page = await verifyPageText(ctx, `verify_${subtask.id}_${subtask.attempts}`);
     const verdict = await ctx.models.judge(
       [
+        `User task: ${state.task}`,
         `Goal: ${subtask.goal}`,
         `Criteria: ${subtask.criteria}`,
         `Agent report: ${subtask.result ?? ""}`,
+        `Saved facts:\n${formatNotes(state.notes) || "(none)"}`,
         `Last tool results the agent saw:\n${subtask.observations?.join("\n\n") || "(none)"}`,
-        `Current page:\n${page.text}`,
+        `Current page:\n${page}`,
       ].join("\n\n"),
       ctx.signal,
     );
@@ -120,7 +126,8 @@ async function verifyNode(ctx: AgentRunContext, state: State): Promise<Partial<S
     return { subtasks, current: next < subtasks.length ? next : state.current };
   }
   if (subtask.attempts < MAX_ATTEMPTS) {
-    return { subtasks: replaceAt(state.subtasks, state.current, { ...subtask, status: "pending", feedback: reason }) };
+    const feedback = subtask.result && subtask.result !== reason ? `${reason}\nYour report from that attempt: ${subtask.result}` : reason;
+    return { subtasks: replaceAt(state.subtasks, state.current, { ...subtask, status: "pending", feedback }) };
   }
   // Out of attempts: later subtasks may depend on this one, so stop here.
   return { subtasks: replaceAt(state.subtasks, state.current, { ...subtask, status: "failed", result: reason }) };
@@ -129,11 +136,13 @@ async function verifyNode(ctx: AgentRunContext, state: State): Promise<Partial<S
 async function finalizeNode(ctx: AgentRunContext, state: State): Promise<Partial<State>> {
   ctx.emit({ type: "step", node: "finalize", message: "Writing the answer" });
   const subtasks = state.subtasks
-    .map((s) => `${s.id}. [${s.status === "verified" ? "done" : s.status}] ${s.goal}${s.result ? ` -> ${s.result}` : ""}`)
+    .map((s) => {
+      const line = `${s.id}. [${s.status === "verified" ? "done" : s.status}] ${s.goal}${s.result ? ` -> ${s.result}` : ""}`;
+      const reports = (s.reports ?? []).map((r, i) => `   attempt ${i + 1} report: ${r}`);
+      return [line, ...reports].join("\n");
+    })
     .join("\n");
-  const notes = Object.entries(state.notes)
-    .map(([k, v]) => `- ${k}: ${v}`)
-    .join("\n");
+  const notes = formatNotes(state.notes);
   const final = await ctx.models.finalize(
     `User task:\n${state.task}\n\nSubtasks:\n${subtasks}\n\nSaved facts:\n${notes || "(none)"}`,
     ctx.signal,
@@ -141,9 +150,24 @@ async function finalizeNode(ctx: AgentRunContext, state: State): Promise<Partial
   return { final };
 }
 
+// The top of the page (headings, a form's state) and, when the page is long,
+// its end too (a chat reply, a confirmation below the fold).
+async function verifyPageText(ctx: AgentRunContext, id: string): Promise<string> {
+  const top = await callBrowserTool(ctx, "browser_snapshot", { mode: "text", max_chars: VERIFY_SNAPSHOT_CHARS }, `${id}_top`);
+  if (!top.ok || !top.text.includes(" more chars (offset=")) return top.text;
+  const end = await callBrowserTool(ctx, "browser_snapshot", { mode: "text", max_chars: VERIFY_SNAPSHOT_CHARS, from_end: true }, `${id}_end`);
+  return `${top.text}\n\nEnd of the page:\n${end.text}`;
+}
+
 async function listTabs(ctx: AgentRunContext): Promise<string> {
   const result = await callBrowserTool(ctx, "browser_tabs", { action: "list" }, `tabs_${Date.now()}`);
   return result.text;
+}
+
+function formatNotes(notes: Record<string, string>): string {
+  return Object.entries(notes)
+    .map(([k, v]) => `- ${k}: ${v}`)
+    .join("\n");
 }
 
 function replaceAt(plan: Subtask[], index: number, subtask: Subtask): Subtask[] {

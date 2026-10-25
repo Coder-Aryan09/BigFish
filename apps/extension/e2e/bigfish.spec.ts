@@ -154,7 +154,8 @@ test("the agent cursor and control frame show on the page during an action", asy
 test("fill_form handles text, ARIA radios and checkboxes; a missing field shows up as an alert", async () => {
   await h.callTool("browser_navigate", { url: h.fixtureUrl("survey.html") });
   const snap = (await h.callTool("browser_snapshot", {})).text;
-  expect(snap).toMatch(/radio "2022" \[ \]/);
+  // Each radio says which question it answers.
+  expect(snap).toMatch(/radio "2022" \[ \] in "Graduation year"/);
 
   const early = await h.callTool("browser_click", { ref: refOf(snap, 'button "Submit"') });
   expect(early.text).toContain('alert: "This is a required question"');

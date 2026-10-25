@@ -1,7 +1,7 @@
 // BigFish agent: tools the model can call. Browser tools come from the contracts
 // (filtered to what the device reported). Control tools end or feed a subtask.
 // The actor loop runs every call itself, so these are definitions only.
-import { TOOLS } from "@bigfish/contracts";
+import { TOOLS, normalizeToolArgs } from "@bigfish/contracts";
 import { tool, type StructuredToolInterface } from "@langchain/core/tools";
 import { z } from "zod";
 
@@ -54,7 +54,8 @@ export function parseToolArgs(
 ): { ok: true; args: Record<string, unknown> } | { ok: false; error: string } {
   const schema = SCHEMAS[name];
   if (!schema) return { ok: false, error: `Unknown tool ${name}.` };
-  const parsed = schema.safeParse(args ?? {});
+  const raw = (args ?? {}) as Record<string, unknown>;
+  const parsed = schema.safeParse(isControlTool(name) ? raw : normalizeToolArgs(name, raw));
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `${i.path.join(".") || "args"}: ${i.message}`).join("; ");
     return { ok: false, error: issues };

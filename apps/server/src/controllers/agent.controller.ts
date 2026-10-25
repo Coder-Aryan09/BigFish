@@ -22,6 +22,9 @@ export interface AgentDeps {
 }
 
 const MAX_SUBTASK_TOOL_CALLS = 30;
+// A comment line now and then, so proxies and clients do not drop a quiet stream
+// while a slow model or a long wait_for runs.
+const HEARTBEAT_MS = 15_000;
 const ERROR_MESSAGE_LIMIT = 200;
 
 export function agentController(deps: AgentDeps) {
@@ -70,6 +73,9 @@ export function agentController(deps: AgentDeps) {
         writes = writes.then(() => stream.writeSSE({ event: event.type, data: JSON.stringify(event) })).catch(() => {});
       };
       stream.onAbort(() => run.controller.abort(new RunStopped(AgentErrorCode.CANCELLED, "The client disconnected.")));
+      const heartbeat = setInterval(() => {
+        writes = writes.then(() => stream.write(": keepalive\n\n")).then(() => {}, () => {});
+      }, HEARTBEAT_MS);
       const timer = setTimeout(
         () => run.controller.abort(new RunStopped(AgentErrorCode.TIME_LIMIT, `Run took longer than ${Math.round(maxDurationMs / 1000)}s.`)),
         maxDurationMs,
@@ -102,6 +108,7 @@ export function agentController(deps: AgentDeps) {
         console.warn(`[BigFish] run ${run.runId} ended: ${event.code} ${detail}`);
       } finally {
         clearTimeout(timer);
+        clearInterval(heartbeat);
         deps.runs.finish(run);
         await writes;
       }

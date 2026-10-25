@@ -25,12 +25,13 @@ export interface Harness {
   close: () => Promise<void>;
 }
 
-export async function startHarness(): Promise<Harness> {
+// serverEnv: extra server env, e.g. a model key for the agent evals.
+export async function startHarness(opts: { serverEnv?: Record<string, string> } = {}): Promise<Harness> {
   const fixtures = await startFixtureServer();
   const { context, worker, extensionId } = await launchExtension();
 
   const serverUrl = `http://127.0.0.1:${E2E_SERVER_PORT}`;
-  const server = await startBigFishServer(extensionId);
+  const server = await startBigFishServer(extensionId, opts.serverEnv);
 
   try {
     // Dev login instead of Google: put the JWT where the extension keeps it.
@@ -99,18 +100,17 @@ async function startFixtureServer(): Promise<{ server: Server; url: (name: strin
       res.writeHead(404).end();
       return;
     }
-    try {
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(await readFile(FIXTURES_DIR + name));
-    } catch {
-      res.writeHead(404).end();
-    }
+    // Read first: headers can only be written once, so a missing file must not have sent a 200.
+    const body = await readFile(FIXTURES_DIR + name).catch(() => null);
+    if (body) res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(body);
+    else res.writeHead(404).end();
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   return { server, url: (name) => `http://127.0.0.1:${port}/${name}` };
 }
 
-async function startBigFishServer(extensionId: string): Promise<ChildProcess> {
+async function startBigFishServer(extensionId: string, extraEnv: Record<string, string> = {}): Promise<ChildProcess> {
   const child = spawn(`${SERVER_DIR}/node_modules/.bin/tsx`, ["src/index.ts"], {
     cwd: SERVER_DIR,
     env: {
@@ -122,6 +122,7 @@ async function startBigFishServer(extensionId: string): Promise<ChildProcess> {
       EXTENSION_ID: extensionId,
       GOOGLE_EXTENSION_CLIENT_ID: "e2e-unused.apps.googleusercontent.com",
       ENABLE_DEV_ROUTES: "1",
+      ...extraEnv,
     },
     stdio: ["ignore", "inherit", "inherit"],
   });

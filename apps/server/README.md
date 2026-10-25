@@ -104,9 +104,15 @@ apps/server/
 |---|---|---|---|
 | `PORT` | ❌ | Port the HTTP daemon listens on (defaults to 8787) | `8787` |
 | `HOST` | ❌ | Bind interface (defaults to 127.0.0.1 for local isolation) | `127.0.0.1` |
-| `MISTRAL_API_KEY` | ✅ | Mistral AI API key for LangGraph agent planning and actions | `mstrl_sample_api_key_xxxxxxxx` |
-| `AGENT_MODEL` | ❌ | Primary planning and tool-calling LLM | `codestral-latest` |
-| `AGENT_JUDGE_MODEL` | ❌ | Fast verification judge model | `codestral-latest` |
+| `NVIDIA_API_KEY` | One model key ✅ | NVIDIA key (free at build.nvidia.com). Used first when set | `nvapi-sample-xxxxxxxx` |
+| `NVIDIA_MODEL` | ❌ | NVIDIA agent model (must support tool calling) | `nvidia/nemotron-3.5-super-vl-120b-a12b` |
+| `NVIDIA_JUDGE_MODEL` | ❌ | NVIDIA model that checks each subtask | `nvidia/nemotron-3.5-lightning-30b-a3b` |
+| `OPEN_ROUTER_API_KEY` | One model key ✅ | OpenRouter key. Used when no NVIDIA key is set | `sk-or-v1-sample-xxxxxxxx` |
+| `OPEN_ROUTER_MODEL` | ❌ | OpenRouter agent model | `openai/gpt-6-luna` |
+| `OPEN_ROUTER_JUDGE_MODEL` | ❌ | OpenRouter judge model (defaults to `OPEN_ROUTER_MODEL`) | `openai/gpt-6-luna` |
+| `MISTRAL_API_KEY` | One model key ✅ | Mistral key. Used when no NVIDIA or OpenRouter key is set. With no model key, `/api/agent/invoke` answers 503 | `mstrl_sample_api_key_xxxxxxxx` |
+| `AGENT_MODEL` | ❌ | Mistral agent model (must support tool calling) | `mistral-medium-latest` |
+| `AGENT_JUDGE_MODEL` | ❌ | Mistral judge model | `mistral-small-latest` |
 | `GOOGLE_EXTENSION_CLIENT_ID`| ✅ | Chrome Extension OAuth Client ID | `123456789-sample.apps.googleusercontent.com` |
 | `JWT_SECRET` | ✅ | Symmetric secret for signing BigFish access JWTs | `super-secret-random-jwt-key-32chars` |
 | `EXTENSION_ID` | ✅ | Chrome Extension ID to enforce WebSocket Origin check | `abcdefghijklmnopabcdefghijklmnop` |

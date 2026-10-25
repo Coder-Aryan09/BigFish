@@ -95,9 +95,9 @@ export function rehydrateArgs(
   tool: string,
   args: any,
   targetOrigin: string
-): { args: any; crossOrigins: string[]; rehydrated: boolean } {
+): { args: any; crossOrigins: string[]; rehydrated: boolean; unknown: string[] } {
   if (!args || typeof args !== "object") {
-    return { args, crossOrigins: [], rehydrated: false };
+    return { args, crossOrigins: [], rehydrated: false, unknown: [] };
   }
 
   const crossOriginsSet = new Set<string>();
@@ -119,5 +119,7 @@ export function rehydrateArgs(
   }
 
   walkAndRehydrate(cloned);
-  return { args: cloned, crossOrigins: Array.from(crossOriginsSet), rehydrated };
+  // A token still there after rehydration is not in the vault: the model made it up.
+  const unknown = [...new Set(JSON.stringify(cloned).match(/\[(EMAIL|PHONE|AADHAAR|PAN|CARD|SSN|SECRET)_[0-9A-F]{4}\]/g) ?? [])];
+  return { args: cloned, crossOrigins: Array.from(crossOriginsSet), rehydrated, unknown };
 }

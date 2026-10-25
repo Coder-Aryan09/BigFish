@@ -48,6 +48,7 @@ async function handle({ type, payload = {} }: Message): Promise<Record<string, u
           scrollHeight: document.documentElement.scrollHeight,
           dialog: bigFishDOM.openDialog(),
           alerts: bigFishDOM.alerts(),
+          lines: bigFishDOM.visibleLines(),
         };
 
       case "BIGFISH_TEXT":

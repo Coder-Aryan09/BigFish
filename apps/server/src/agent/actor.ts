@@ -25,6 +25,7 @@ export interface AgentRunContext extends ToolCallContext {
 export class ToolLimitError extends Error {}
 
 export interface SubtaskInput {
+  task?: string;
   goal: string;
   criteria: string;
   feedback?: string;
@@ -146,6 +147,7 @@ export async function runSubtask(ctx: AgentRunContext, subtaskId: number, input:
 function subtaskBrief(input: SubtaskInput): string {
   const notes = Object.entries(input.notes);
   return [
+    input.task ? `User task: ${input.task}` : "",
     `Subtask goal: ${input.goal}`,
     `Done when: ${input.criteria}`,
     input.feedback ? `Previous attempt was not accepted: ${input.feedback}` : "",

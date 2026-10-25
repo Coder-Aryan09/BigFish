@@ -4,6 +4,7 @@ import type { ConnState, ConnStatus } from "../background/conn/connection.js";
 import { startAgentRun, type AgentRun } from "./agent-client.js";
 import type { ApprovalRequest } from "../../safety/approval.js";
 import { setupVoiceInput } from "./voice-input.js";
+import { HexagonalVault } from "./hexagonal-vault.js";
 
 const CONN_LABELS: Record<ConnState, string> = {
   signed_out: "Signed out",
@@ -112,10 +113,26 @@ document.addEventListener("DOMContentLoaded", () => {
     void browser.storage.local.set({ [CURSOR_KEY]: on });
   });
 
+  // Hexagonal Vault WebGL2 Background
+  let vaultEngine: any = null;
+  const canvasEl = document.querySelector<HTMLCanvasElement>("#particleWaveCanvas");
+  if (canvasEl) {
+    try {
+      vaultEngine = new HexagonalVault(canvasEl, {
+        theme: document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark",
+      });
+    } catch (err) {
+      console.warn("[BigFish] HexagonalVault init error:", err);
+    }
+  }
+
   // Dual Theme Toggle (Dark / Light)
   const THEME_KEY = "bigfish.theme";
   const renderTheme = (theme: "light" | "dark") => {
     document.documentElement.setAttribute("data-theme", theme);
+    if (vaultEngine) {
+      vaultEngine.setTheme(theme);
+    }
     if (themeToggleBtn) {
       themeToggleBtn.setAttribute("data-theme", theme);
       themeToggleBtn.title = `Switch to ${theme === "dark" ? "light" : "dark"} mode`;

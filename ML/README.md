@@ -3,7 +3,7 @@
 > High-throughput on-device perception daemon combining PaddleOCR, BERT-NER, YOLO, and visual screenshot sanitization for zero-trust browser automation.
 
 ![Version](https://img.shields.io/badge/version-0.1.0-blue)
-![Status](https://img.shields.io/badge/status-Production--Ready-brightgreen)
+![Status](https://img.shields.io/badge/status-Development-yellow)
 ![Runtime](https://img.shields.io/badge/runtime-Python%203.12%20%2B%20PyTorch%20%2B%20FastAPI-informational)
 
 ---
@@ -22,22 +22,22 @@
 ## 🎯 Overview & The "Why"
 
 ### What this service does
-The **BigFish ML Privacy Service** (`BigFish/ML/`) is a standalone, local perception daemon running on `127.0.0.1:8788`. It intercepts screenshots and page buffers directly on the user's host machine. By synthesizing optical character recognition (PaddleOCR), named-entity recognition (BERT-NER), computer vision object detection (YOLO), and spatial entity resolution, it computes exact pixel bounding boxes for sensitive PII and applies visual redaction *before* any image buffer leaves the local host.
+The **BigFish ML Privacy Service** (`BigFish/ML/`) is a standalone, local perception daemon running on `127.0.0.1:8788`. It takes a screenshot (base64) over HTTP and works on it on the user's machine. By synthesizing optical character recognition (PaddleOCR), named-entity recognition (BERT-NER), computer vision object detection (YOLO), and spatial entity resolution, it computes exact pixel bounding boxes for sensitive PII and applies visual redaction *before* any image buffer leaves the local host.
 
 ### Why this is its own microservice (not part of a monolith)
 - **Bounded context:** Owns heavy neural network weights, GPU/CPU tensor inference, computer vision models, and visual image blackout transformations exclusively.
 - **Independent scaling need:** PyTorch, PaddlePaddle, and HuggingFace Transformer model footprints require gigabytes of system memory and specialized native C++/CUDA runtimes that would destabilize the Node.js agent event loop if coupled into a single process.
 - **Independent deployability:** Machine learning models, OCR dictionaries, and computer vision weights can be re-trained and updated on independent lifecycles without requiring Node.js service rebuilds.
-- **Failure isolation:** If high image resolution or tensor memory spikes cause an Out-Of-Memory condition in the Python runtime, the main agent orchestrator detects the failure via circuit breaker and fails gracefully rather than taking down the entire browser connection.
+- **Failure isolation:** an out-of-memory crash in the Python runtime takes down only this daemon. The agent and the extension do not depend on it today, so they keep working.
 - **Data isolation strategy:** 100% ephemeral in-memory processing. Images are loaded as transient PIL/NumPy arrays; zero raw screenshots or PII strings are persisted to disk or sent over external networks.
 
 ### The "User" of this service
 
 | Caller | Call type | Why it calls this service |
 |---|---|---|
-| BigFish Chrome Extension Background | Sync HTTP POST (`/v1/privacy/mask`) | Sends viewport screenshots to compute normalized bounding box coordinates for client-side canvas masking |
-| BigFish Backend Agent Server | Sync HTTP POST (`/v1/privacy/sanitize`) | Sends screenshot buffers to receive visually redacted images with blacked-out PII boxes |
-| Local Process Health Monitors | Sync HTTP GET (`/healthz`, `/ready`) | Verifies Python daemon liveness and model initialization readiness |
+| BigFish Chrome Extension | Planned: Sync HTTP POST (`/v1/privacy/mask`) | Would get box coordinates to mask a screenshot. **Not wired yet:** no code in `apps/extension` calls this daemon |
+| BigFish Agent Server | Planned: Sync HTTP POST (`/v1/privacy/sanitize`) | Would get a redacted screenshot. **Not wired yet:** no code in `apps/server` calls this daemon |
+| Tests and developers | Sync HTTP (`/healthz`, `/ready`, both `/v1/privacy/*` routes) | `tests/test_server.py`, `tests/test_e2e_full.py`, and manual `curl` |
 
 ---
 
@@ -46,11 +46,11 @@ The **BigFish ML Privacy Service** (`BigFish/ML/`) is a standalone, local percep
 ### Current state
 | Field | Value |
 |---|---|
-| **Status** | 🟢 Production-Ready Local Daemon / Fully Implemented |
+| **Status** | 🟡 Development: the daemon and its endpoints work; no BigFish app calls it yet |
 | **Version** | `0.1.0` |
 | **Last deployed** | Local Daemon (`127.0.0.1:8788`) |
 | **Owner(s)** | BigFish Machine Learning & Privacy Team |
-| **Known technical debt** | Custom YOLO weights (`yolo26s.pt`) fall back to standard `yolov8n.pt` when custom UI fine-tuned weights are absent. Deterministic Indian PII validators (Verhoeff for Aadhaar, Luhn for cards) currently run in the extension safety layer and are planned for Python-side porting. |
+| **Known technical debt** | Not called by the extension or the server yet. `ML/src/manifest.json`, `background.js` and `content/` are a separate prototype extension ("Privacy-Preserving Vision Agent"), not the BigFish extension. `/ready` lists the same three models whenever the pipeline loads. Custom YOLO weights (`models/yolo26s.pt`) fall back to standard `yolov8n.pt` when absent. Deterministic Indian PII validators (Verhoeff for Aadhaar, Luhn for cards) currently run in the extension safety layer and are planned for Python-side porting. |
 
 ### Features built (working today)
 - `GET /healthz` — Lightweight daemon liveness probe returning service status — ✅ done
@@ -128,7 +128,7 @@ pnpm dev:ml
 # Or using uv directly
 uv --directory ML run python -m ML.src.server
 
-# Or using uvicorn directly
+# Or using uvicorn directly (Windows PowerShell path shown; on macOS/Linux use ML/.venv/bin/uvicorn)
 & "ML\.venv\Scripts\uvicorn.exe" ML.src.server:app --host 127.0.0.1 --port 8788 --reload
 
 # Run comprehensive end-to-end network test
@@ -140,7 +140,7 @@ uv --directory ML run pytest ML/tests -v
 
 ---
 
-## 📡 Communication & Contracts
+## 🔌 Communication & Contracts
 
 ### Inbound Endpoints
 - `GET /healthz` — Returns `{ "status": "ok", "service": "bigfish-ml", "time": 1792890870.74 }`
@@ -160,6 +160,12 @@ uv --directory ML run pytest ML/tests -v
 
 ---
 
-## 📜 Changelog & Migration State
+## 📝 Changelog & Migration State
 
 - **v0.1.0:** Complete implementation and verification of PaddleOCR, BERT-NER, YOLO, EntityResolver, ScreenshotSanitizer, and FastAPI daemon.
+
+---
+
+## 🤝 Ownership
+- **Maintainer(s):** BigFish team (see the root README)
+- **Escalation:** GitHub issues on the repo

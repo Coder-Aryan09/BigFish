@@ -32,6 +32,8 @@ export function createApp(opts: AppOptions) {
   nodeWs.wss.options.maxPayload = MAX_FRAME_BYTES;
 
   app.get("/health", (c) => c.json({ ok: true, name: "bigfish", devices: registry.size, runs: runs.size }));
+  app.get("/healthz", (c) => c.json({ ok: true, name: "bigfish", devices: registry.size, runs: runs.size }));
+  app.get("/ready", (c) => c.json({ ok: true, ready: true, name: "bigfish", devices: registry.size, runs: runs.size }));
   app.get(
     WS_PATH,
     requireTicket(tickets, opts.auth.extensionOrigin),

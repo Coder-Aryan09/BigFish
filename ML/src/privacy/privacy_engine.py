@@ -5,8 +5,7 @@
 from collections.abc import Mapping
 from typing import Any
 
-from ML.src.privacy.session_manager import SessionManager
-
+from privacy.session_manager import SessionManager
 
 class PrivacyEngine:
     """

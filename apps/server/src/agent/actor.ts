@@ -5,6 +5,7 @@ import { ErrorCode, TOOLS, toolError, type AgentEvent } from "@bigfish/contracts
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage, type BaseMessage } from "@langchain/core/messages";
 import type { AgentModels } from "./models.js";
 import { LoopGuard } from "./loop-guard.js";
+import { checkPersonalValues } from "./personal-guard.js";
 import { ACTOR_PROMPT } from "./prompts.js";
 import { callBrowserTool, isReadOnlyTool, type ToolCallContext } from "./tool-policy.js";
 import { agentToolDefs, isControlTool, parseToolArgs } from "./tools.js";
@@ -20,11 +21,15 @@ export interface AgentRunContext extends ToolCallContext {
   limits: AgentLimits;
   // Browser tool calls so far in this run, across subtasks.
   usage: { toolCalls: number };
+  // Browser result texts so far in this run, for the personal details guard.
+  seen?: string[];
 }
 
 export class ToolLimitError extends Error {}
 
 export interface SubtaskInput {
+  // The user's whole task, so links and values the planner left out still reach the actor.
+  task: string;
   goal: string;
   criteria: string;
   feedback?: string;
@@ -45,7 +50,8 @@ const KEEP_FULL_RESULTS = 3;
 // Times we remind a model that answered in text instead of calling a tool.
 const MAX_NUDGES = 2;
 const EVENT_TEXT_LIMIT = 1_500;
-const OBSERVATIONS_KEPT = 3;
+// Enough to cover fill, submit, wait and snapshot, so the verifier sees the fill too.
+const OBSERVATIONS_KEPT = 6;
 const OBSERVATION_CHARS = 1_000;
 
 export async function runSubtask(ctx: AgentRunContext, subtaskId: number, input: SubtaskInput): Promise<SubtaskOutcome> {
@@ -55,6 +61,7 @@ export async function runSubtask(ctx: AgentRunContext, subtaskId: number, input:
   const guard = new LoopGuard();
   const notes = { ...input.notes };
   const observations: string[] = [];
+  const seen = (ctx.seen ??= []);
   const end = (outcome: Pick<SubtaskOutcome, "status" | "result">): SubtaskOutcome => ({
     ...outcome,
     notes,
@@ -66,7 +73,15 @@ export async function runSubtask(ctx: AgentRunContext, subtaskId: number, input:
 
   for (;;) {
     ctx.signal.throwIfAborted();
-    const reply = await model.invoke(clearOldResults(messages), { signal: ctx.signal });
+    let reply: AIMessage;
+    try {
+      reply = await model.invoke(clearOldResults(messages), { signal: ctx.signal });
+    } catch (err) {
+      // A reply cut at the token limit (long reasoning) is not fatal: ask for a short one, a few times.
+      if (!/length limit/i.test(err instanceof Error ? err.message : String(err)) || nudges++ >= MAX_NUDGES) throw err;
+      messages.push(new HumanMessage("Your last reply was cut off because it was too long. Think briefly, then call one tool."));
+      continue;
+    }
     const calls = reply.tool_calls ?? [];
     // Mistral rejects an assistant message with no text and no tool calls,
     // so an empty reply is dropped instead of kept in the history.
@@ -121,6 +136,11 @@ export async function runSubtask(ctx: AgentRunContext, subtaskId: number, input:
         answer(looped);
         continue;
       }
+      const blocked = checkPersonalValues(call.name, args, { task: input.task, results: seen });
+      if (blocked) {
+        answer(blocked);
+        continue;
+      }
       if (ctx.usage.toolCalls >= ctx.limits.maxToolCalls) {
         throw new ToolLimitError(`Run used its ${ctx.limits.maxToolCalls} browser tool calls.`);
       }
@@ -134,6 +154,7 @@ export async function runSubtask(ctx: AgentRunContext, subtaskId: number, input:
       const result = await callBrowserTool(ctx, call.name, args, id);
       ctx.emit({ type: "tool_result", toolCallId: id, name: call.name, ok: result.ok, text: result.text.slice(0, EVENT_TEXT_LIMIT) });
       answer(result.text);
+      seen.push(result.text);
       guard.record(call.name, args, result.ok);
       observations.push(`${call.name}: ${result.text.slice(0, OBSERVATION_CHARS)}`);
       if (!isReadOnlyTool(call.name)) acted = true;
@@ -146,6 +167,7 @@ export async function runSubtask(ctx: AgentRunContext, subtaskId: number, input:
 function subtaskBrief(input: SubtaskInput): string {
   const notes = Object.entries(input.notes);
   return [
+    `User task (context for links and values; do only the subtask below):\n${input.task}`,
     `Subtask goal: ${input.goal}`,
     `Done when: ${input.criteria}`,
     input.feedback ? `Previous attempt was not accepted: ${input.feedback}` : "",
@@ -157,14 +179,17 @@ function subtaskBrief(input: SubtaskInput): string {
 }
 
 // Keeps the last KEEP_FULL_RESULTS browser results. Older ones become a stub,
-// since the page has changed since then anyway.
+// since the page has changed since then anyway. The last snapshot is kept too:
+// it is the ref list the model is still acting on.
 function clearOldResults(messages: BaseMessage[]): BaseMessage[] {
   const browserResults = messages.filter((m) => ToolMessage.isInstance(m) && m.name && !isControlTool(m.name));
   const stale = new Set(browserResults.slice(0, -KEEP_FULL_RESULTS));
+  const lastSnapshot = browserResults.findLast((m) => ToolMessage.isInstance(m) && m.name === "browser_snapshot");
+  if (lastSnapshot) stale.delete(lastSnapshot);
   if (stale.size === 0) return messages;
   return messages.map((m) =>
     stale.has(m) && ToolMessage.isInstance(m)
-      ? new ToolMessage({ content: "[old result cleared]", tool_call_id: m.tool_call_id, name: m.name })
+      ? new ToolMessage({ content: "[old result cleared; values you saved with save_fact are kept]", tool_call_id: m.tool_call_id, name: m.name })
       : m,
   );
 }

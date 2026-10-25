@@ -355,6 +355,32 @@ describe("agent run", () => {
     assert.equal(clicks, 0);
     await closeExt(ext);
   });
+
+  test("filler args from the model (null, empty, false, an action next to a url) are dropped", async () => {
+    let navigated: Record<string, unknown> | undefined;
+    let typed: Record<string, unknown> | undefined;
+    script = {
+      act: (_messages, turn) => {
+        if (turn === 0) return callTool("browser_navigate", { url: "https://example.com", action: "forward", tab: null, new_tab: false });
+        if (turn === 1) return callTool("browser_type", { ref: "1:2", text: "hi", clear: false, submit: false });
+        return complete();
+      },
+    };
+    const ext = await fake({
+      handlers: {
+        ...pageHandlers,
+        browser_navigate: (args) => ((navigated = args), "ok navigated"),
+        browser_type: (args) => ((typed = args), "ok type"),
+      },
+    });
+    await session(ext.deviceId);
+
+    await readEvents(await invoke(ext.deviceId));
+    assert.deepEqual(navigated, { url: "https://example.com" });
+    // clear defaults to true, so an explicit false is kept.
+    assert.equal(typed?.clear, false);
+    await closeExt(ext);
+  });
 });
 
 describe("tool calls when the extension disconnects", () => {

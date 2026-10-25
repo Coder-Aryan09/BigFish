@@ -23,6 +23,9 @@ export interface ScannedElement {
   value?: string;
   checked?: boolean;
   href?: string;
+  // The question or group a field belongs to, when its own name does not say it
+  // (e.g. a Google Forms "Your answer" box or a "2022" radio).
+  group?: string;
   inViewport: boolean;
 }
 
@@ -51,8 +54,35 @@ const INTERACTIVE_SELECTOR = [
 
 // Scans stop here, so a huge page cannot stall the content script.
 const MAX_SCAN = 800;
+// browser_find looks further: it only returns the best few.
+const MAX_FIND_SCAN = 5_000;
+// Text lines kept per scan, so a delta can say what text an action added.
+const MAX_LINES = 1_500;
+const LINE_CHARS = 200;
+// Keys browser_press_key understands, besides single characters.
+const NAMED_KEYS = new Set([
+  "Enter", "Escape", "Tab", "Backspace", "Delete", "Space", " ", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+  "Home", "End", "PageUp", "PageDown", "Insert", ...Array.from({ length: 12 }, (_, i) => `F${i + 1}`),
+]);
+const MODIFIERS = new Set(["shift", "control", "ctrl", "alt", "option", "meta", "cmd", "command"]);
+
+// querySelectorAll that also looks inside open shadow roots, where web components
+// (YouTube, Salesforce, many design systems) keep their buttons and fields.
+function deepQueryAll<T extends HTMLElement = HTMLElement>(root: ParentNode, selector: string): T[] {
+  const found: T[] = Array.from(root.querySelectorAll<T>(selector));
+  for (const el of Array.from(root.querySelectorAll("*"))) {
+    if (el.shadowRoot) found.push(...deepQueryAll<T>(el.shadowRoot, selector));
+  }
+  return found;
+}
 const NAME_CHARS = 80;
 const TEXT_ROLES = new Set(["textbox", "searchbox", "combobox"]);
+const FIELD_ROLES = new Set(["textbox", "searchbox", "combobox", "listbox", "checkbox", "radio", "switch", "option"]);
+const GROUP_SELECTOR = "[role='radiogroup'], [role='group'], [role='listbox'], fieldset";
+const HEADING_SELECTOR = "[role='heading'], h1, h2, h3, h4, h5, h6, legend, label";
+// A container with more fields than this is a whole form, not one question.
+const GROUP_MAX_FIELDS = 12;
+const GROUP_MAX_DEPTH = 8;
 
 export class BigFishDOMEngine {
   private readonly elementMap = new Map<string, HTMLElement>();
@@ -101,7 +131,7 @@ export class BigFishDOMEngine {
     if (labelledby) {
       const text = labelledby
         .split(/\s+/)
-        .map((id) => document.getElementById(id)?.textContent ?? "")
+        .map((id) => ((el.getRootNode() as Document | ShadowRoot).getElementById?.(id) ?? document.getElementById(id))?.textContent ?? "")
         .join(" ");
       if (text.trim()) return clean(text);
     }
@@ -122,6 +152,30 @@ export class BigFishDOMEngine {
     const alt = el.querySelector("img[alt]")?.getAttribute("alt");
     const text = clean(el.innerText || el.textContent);
     return text || clean(alt);
+  }
+
+  // Nearest labelled group (radiogroup, fieldset) or small container with a heading,
+  // e.g. one Google Forms question. Undefined when it adds nothing to the name.
+  private getGroupLabel(el: HTMLElement, name: string): string | undefined {
+    const clean = (s: string | null | undefined) => (s ?? "").replace(/\s+/g, " ").trim().slice(0, NAME_CHARS);
+    let node = el.parentElement;
+    for (let depth = 0; node && node !== document.body && depth < GROUP_MAX_DEPTH; depth++, node = node.parentElement) {
+      let label = "";
+      // Only a named group counts: an unnamed one would read out its own options.
+      if (node.matches(GROUP_SELECTOR) && (node instanceof HTMLFieldSetElement || node.hasAttribute("aria-label") || node.hasAttribute("aria-labelledby"))) {
+        label = node instanceof HTMLFieldSetElement ? clean(node.querySelector("legend")?.textContent) : this.getAccessibleName(node);
+      }
+      if (!label) {
+        if (node.querySelectorAll(INTERACTIVE_SELECTOR).length > GROUP_MAX_FIELDS) return undefined;
+        // Not another option's own label (a <label> around a sibling radio).
+        const heading = Array.from(node.querySelectorAll<HTMLElement>(HEADING_SELECTOR)).find(
+          (h) => !h.contains(el) && !h.querySelector(INTERACTIVE_SELECTOR) && !(h instanceof HTMLLabelElement && h.control) && this.isVisible(h),
+        );
+        label = clean(heading?.innerText || heading?.textContent);
+      }
+      if (label) return name.toLowerCase().includes(label.toLowerCase()) ? undefined : label;
+    }
+    return undefined;
   }
 
   private valueOf(el: HTMLElement, role: string): string | undefined {
@@ -171,12 +225,13 @@ export class BigFishDOMEngine {
     return ref;
   }
 
-  scan(within?: HTMLElement | null, opts: { viewportOnly?: boolean } = {}): ScannedElement[] {
+  scan(within?: HTMLElement | null, opts: { viewportOnly?: boolean; max?: number } = {}): ScannedElement[] {
     const root = within ?? document.body;
     if (!root) return [];
     const results: ScannedElement[] = [];
-    for (const el of Array.from(root.querySelectorAll<HTMLElement>(INTERACTIVE_SELECTOR))) {
-      if (results.length >= MAX_SCAN) break;
+    const max = opts.max ?? MAX_SCAN;
+    for (const el of deepQueryAll(root, INTERACTIVE_SELECTOR)) {
+      if (results.length >= max) break;
       if (!this.isVisible(el)) continue;
       const inViewport = this.inViewport(el);
       if (opts.viewportOnly && !inViewport) continue;
@@ -189,10 +244,15 @@ export class BigFishDOMEngine {
       this.fingerprintMap.set(ref, { role, name, tag: el.tagName.toLowerCase(), css: this.computeCssSelector(el), href });
 
       const entry: ScannedElement = { ref, role, name, href, inViewport };
+      if (FIELD_ROLES.has(role)) {
+        const group = this.getGroupLabel(el, name);
+        if (group) entry.group = group;
+      }
       const value = this.valueOf(el, role);
       if (value !== undefined) entry.value = value;
       if (el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")) entry.checked = el.checked;
       else if (el.getAttribute("aria-checked")) entry.checked = el.getAttribute("aria-checked") === "true";
+      else if (role === "option" && el.hasAttribute("aria-selected")) entry.checked = el.getAttribute("aria-selected") === "true";
       results.push(entry);
     }
     if (within) return results;
@@ -204,7 +264,7 @@ export class BigFishDOMEngine {
   }
 
   private openDialogElement(): HTMLElement | undefined {
-    const dialogs = Array.from(document.querySelectorAll<HTMLElement>("dialog[open], [role='dialog'], [role='alertdialog'], [aria-modal='true']"));
+    const dialogs = deepQueryAll(document, "dialog[open], [role='dialog'], [role='alertdialog'], [aria-modal='true']");
     // The last visible one is the one on top.
     return dialogs.filter((d) => this.isVisible(d)).at(-1);
   }
@@ -222,6 +282,16 @@ export class BigFishDOMEngine {
     return text;
   }
 
+  // Short distinct text lines, so a delta can show text an action added
+  // (e.g. "Saved", "Your response has been recorded") even when no element changed.
+  visibleLines(): string[] {
+    const lines = this.pageText()
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l && l.length <= LINE_CHARS);
+    return [...new Set(lines)].slice(0, MAX_LINES);
+  }
+
   // ---- ref resolution ------------------------------------------------------------
 
   resolve(ref: string): HTMLElement | null {
@@ -230,7 +300,7 @@ export class BigFishDOMEngine {
     const known = this.elementMap.get(ref);
     if (known?.isConnected) return known;
 
-    const tagged = document.querySelector<HTMLElement>(`[data-bigfish-id="${CSS.escape(ref)}"]`);
+    const tagged = deepQueryAll(document, `[data-bigfish-id="${CSS.escape(ref)}"]`)[0];
     if (tagged) {
       this.elementMap.set(ref, tagged);
       return tagged;
@@ -239,7 +309,7 @@ export class BigFishDOMEngine {
     // Same page, re-rendered: find the element again by role + name (must be unique).
     const fp = this.fingerprintMap.get(ref);
     if (!fp) return null;
-    const matches = Array.from(document.querySelectorAll<HTMLElement>(fp.tag)).filter(
+    const matches = deepQueryAll(document, fp.tag).filter(
       (el) => this.isVisible(el) && this.getRole(el) === fp.role && this.getAccessibleName(el) === fp.name,
     );
     if (matches.length !== 1) return null;
@@ -315,10 +385,13 @@ export class BigFishDOMEngine {
         lastReason = "still moving";
         continue;
       }
-      const top = document.elementFromPoint(r2.left + r2.width / 2, r2.top + r2.height / 2) as HTMLElement | null;
+      // Inside a shadow root, its own elementFromPoint sees past the host.
+      const root = el.getRootNode() as Document | ShadowRoot;
+      const top = (root.elementFromPoint ?? document.elementFromPoint).call(root, r2.left + r2.width / 2, r2.top + r2.height / 2) as HTMLElement | null;
       if (!top || top === el || el.contains(top) || top.contains(el) || top.closest("label")?.contains(el)) return { ok: true };
       const cover = top.closest<HTMLElement>("[data-bigfish-id]");
-      lastReason = `covered by ${top.tagName.toLowerCase()}${cover ? "" : ` "${this.getAccessibleName(top).slice(0, 30)}"`}`;
+      const coverName = this.getAccessibleName(top).slice(0, 30);
+      lastReason = `covered by ${cover ? top.tagName.toLowerCase() : this.computeCssSelector(top)}${coverName && !cover ? ` "${coverName}"` : ""}`;
       return { ok: false, reason: lastReason, coveringRef: cover?.getAttribute("data-bigfish-id") ?? undefined };
     }
     return { ok: false, reason: lastReason };
@@ -351,6 +424,9 @@ export class BigFishDOMEngine {
     const isField = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
     const editable = isField ? el : el.isContentEditable ? el : (el.querySelector<HTMLElement>("[contenteditable='true'], textarea, input") ?? null);
     if (!editable) return { ok: false, error: "NOT_EDITABLE", reason: `${this.getRole(el)} is not a text field` };
+    if ((editable instanceof HTMLInputElement || editable instanceof HTMLTextAreaElement) && editable.readOnly) {
+      return { ok: false, error: "NOT_EDITABLE", reason: "the field is read-only" };
+    }
 
     await agentCursor.pointAt(editable, "Typing");
     await agentCursor.press();
@@ -408,7 +484,7 @@ export class BigFishDOMEngine {
 
   // Visible alert and error texts (e.g. "This is a required question"), for deltas.
   alerts(): string[] {
-    const nodes = Array.from(document.querySelectorAll<HTMLElement>("[role='alert'], [aria-live='assertive'], .error, [aria-invalid='true'] ~ *"));
+    const nodes = deepQueryAll(document, "[role='alert'], [aria-live='assertive'], .error, [aria-invalid='true'] ~ *");
     const texts = nodes
       .filter((n) => this.isVisible(n))
       .map((n) => (n.innerText || "").replace(/\s+/g, " ").trim().slice(0, 80))
@@ -440,11 +516,16 @@ export class BigFishDOMEngine {
     }
 
     // ARIA combobox or listbox: open it, then click the option.
+    const role = this.getRole(el);
+    if (role !== "combobox" && role !== "listbox" && !el.hasAttribute("aria-haspopup")) {
+      return { ok: false, error: "NOT_EDITABLE", reason: `${role} is not a dropdown` };
+    }
     const opened = await this.click(ref);
     if (!opened.ok) return opened;
     await sleep(250);
     const listId = el.getAttribute("aria-controls") ?? el.getAttribute("aria-owns");
-    const scope = (listId && document.getElementById(listId)) || document;
+    // A listbox holds its own options; a combobox points at its popup.
+    const scope = role === "listbox" ? el : (listId && document.getElementById(listId)) || document;
     const options = Array.from(scope.querySelectorAll<HTMLElement>("[role='option']")).filter((o) => this.isVisible(o));
     const match =
       options.find((o) => this.getAccessibleName(o).toLowerCase() === want) ??
@@ -469,9 +550,12 @@ export class BigFishDOMEngine {
       if (target !== document.body) await agentCursor.pointAt(target, `Pressing ${key}`);
       else agentCursor.activity(`Pressing ${key}`);
     }
-    const parts = key.split("+").map((p) => p.trim());
+    const parts = key === "+" ? ["+"] : key.split("+").map((p) => p.trim());
     const main = parts.pop() ?? key;
     const mods = new Set(parts.map((p) => p.toLowerCase()));
+    if (!(main.length === 1 || NAMED_KEYS.has(main)) || [...mods].some((m) => !MODIFIERS.has(m))) {
+      return { ok: false, error: "INVALID_ARGS", reason: `Unknown key "${key}". Use names like Enter, Escape, Tab, ArrowDown, or Control+a` };
+    }
     const init: KeyboardEventInit = {
       key: main,
       code: codeFor(main),
@@ -512,7 +596,7 @@ export class BigFishDOMEngine {
 
   private moveFocus(from: HTMLElement, step: 1 | -1): void {
     const focusable = Array.from(
-      document.querySelectorAll<HTMLElement>("a[href], button, input, select, textarea, [tabindex]:not([tabindex='-1']), [contenteditable='true']"),
+      deepQueryAll(document, "a[href], button, input, select, textarea, [tabindex]:not([tabindex='-1']), [contenteditable='true']"),
     ).filter((el) => !(el as HTMLButtonElement).disabled && this.isVisible(el));
     const index = focusable.indexOf(from);
     focusable.at((index + step + focusable.length) % focusable.length)?.focus();
@@ -521,8 +605,11 @@ export class BigFishDOMEngine {
   async scroll(direction: "up" | "down", amount: "page" | "half", ref?: string): Promise<ActionResult> {
     let box: HTMLElement | null = null;
     if (ref) {
-      box = this.resolve(ref);
-      if (!box) return this.stale(ref);
+      const target = this.resolve(ref);
+      if (!target) return this.stale(ref);
+      // A ref inside a scroll box scrolls that box; with none around it, the page.
+      box = target;
+      while (box && !(box.scrollHeight > box.clientHeight + 1 && /(auto|scroll)/.test(window.getComputedStyle(box).overflowY))) box = box.parentElement;
     }
     const label = direction === "up" ? "Scrolling ↑" : "Scrolling ↓";
     if (box) await agentCursor.pointAt(box, label);
@@ -556,24 +643,31 @@ export class BigFishDOMEngine {
     }
     // Whole-word matches only, so "to" finds "To recipients" but not "Skip to content" first.
     const words = q.split(/\W+/).filter(Boolean);
-    return this.scan()
-      .map((e) => {
-        const name = e.name.toLowerCase();
-        const nameWords = name.split(/\W+/).filter(Boolean);
-        let score = name === q ? 20 : name.startsWith(q) ? 8 : 0;
-        for (const w of words) {
-          if (nameWords.includes(w)) score += 3;
-          else if (w.length >= 4 && name.includes(w)) score += 1;
-          if (e.role === w || (w === "field" && (e.role === "textbox" || e.role === "combobox"))) score += 2;
-        }
-        // A short name that matches is more likely the label itself.
-        if (score > 0) score += Math.max(0, 3 - Math.floor(nameWords.length / 3));
-        return { e, score };
-      })
-      .filter((x) => x.score > 0)
+    const scored = this.scan(null, { max: MAX_FIND_SCAN }).map((e) => {
+      const name = e.name.toLowerCase();
+      const nameWords = name.split(/\W+/).filter(Boolean);
+      const groupWords = (e.group ?? "").toLowerCase().split(/\W+/).filter(Boolean);
+      let score = name === q ? 20 : name.startsWith(q) ? 8 : 0;
+      let hits = 0;
+      for (const w of words) {
+        const before = score;
+        if (nameWords.includes(w)) score += 3;
+        else if (w.length >= 4 && name.includes(w)) score += 1;
+        else if (groupWords.includes(w)) score += 1;
+        if (e.role === w || (w === "field" && (e.role === "textbox" || e.role === "combobox"))) score += 2;
+        if (score > before) hits++;
+      }
+      // A short name that matches is more likely the label itself.
+      if (score > 0) score += Math.max(0, 3 - Math.floor(nameWords.length / 3));
+      return { e, score, hits };
+    });
+    // When some elements match every word ("Item 850"), the ones that match fewer words are noise.
+    const most = Math.max(0, ...scored.map((x) => x.hits));
+    return scored
+      .filter((x) => x.score > 0 && x.hits === most)
       .sort((a, b) => b.score - a.score)
       .slice(0, 5)
-      .map(({ e }) => `${e.ref} ${e.role} "${e.name}"`);
+      .map(({ e }) => `${e.ref} ${e.role} "${e.name}"${e.group ? ` in "${e.group}"` : ""}`);
   }
 
   // Resolves once the DOM had no changes for quietMs (e.g. a streamed chat reply finished), or at timeoutMs.
@@ -623,7 +717,7 @@ export class BigFishDOMEngine {
     if (what === "fields") {
       const lines = this.scan(within)
         .filter((e) => e.value !== undefined || e.checked !== undefined)
-        .map((e) => `${e.ref} ${e.role} "${e.name}" ${e.checked !== undefined ? (e.checked ? "[x]" : "[ ]") : `="${e.value}"`}`)
+        .map((e) => `${e.ref} ${e.role} "${e.name}" ${e.checked !== undefined ? (e.checked ? "[x]" : "[ ]") : `="${e.value}"`}${e.group ? ` in "${e.group}"` : ""}`)
         .filter(keep)
         .slice(0, max);
       return `ok ${lines.length} fields\n${lines.join("\n")}`;

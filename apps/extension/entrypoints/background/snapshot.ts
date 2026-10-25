@@ -10,12 +10,26 @@ export interface ScanResult {
   scrollHeight: number;
   dialog?: string;
   alerts?: string[];
+  // Short visible text lines (see visibleLines in the content script).
+  lines?: string[];
 }
 
 const DELTA_NEW_LIMIT = 5;
+const DELTA_TEXT_LIMIT = 3;
+
+// A long field value, cut for the model. The mark says the field itself holds it all,
+// so the model does not type it again.
+export function clipValue(value: string, max: number): string {
+  return value.length <= max ? value : `${value.slice(0, max)}… [${value.length} chars]`;
+}
+
+// Kept whole up to a long cap: the model copies URLs from here, and a cut URL
+// opens the wrong page. A cut one ends with "…" so it is not copied as is.
+const URL_MAX = 300;
 
 export function shortUrl(url: string): string {
-  return url.replace(/^https?:\/\//, "").replace(/\/$/, "").slice(0, 60);
+  const bare = url.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  return bare.length <= URL_MAX ? bare : `${bare.slice(0, URL_MAX)}…`;
 }
 
 export function header(slot: number, page: Omit<ScanResult, "elements">): string {
@@ -27,8 +41,12 @@ export function header(slot: number, page: Omit<ScanResult, "elements">): string
 export function elementLine(e: ScannedElement, isNew = false): string {
   let line = `${isNew ? "*" : ""}${e.ref} ${e.role} "${e.name.replace(/"/g, "'")}"`;
   if (e.checked !== undefined) line += e.checked ? " [x]" : " [ ]";
-  else if (e.value !== undefined) line += ` ="${e.value.slice(0, 40).replace(/"/g, "'")}"`;
-  if (e.href && !e.href.startsWith("javascript:")) line += ` →${e.href.replace(/^https?:\/\/[^/]+/, "").slice(0, 40) || "/"}`;
+  else if (e.value !== undefined) line += ` ="${clipValue(e.value, 40).replace(/"/g, "'")}"`;
+  if (e.href && !e.href.startsWith("javascript:")) {
+    const path = e.href.replace(/^https?:\/\/[^/]+/, "") || "/";
+    line += ` →${path.length <= 40 ? path : `${path.slice(0, 40)}…`}`;
+  }
+  if (e.group) line += ` in "${e.group.replace(/"/g, "'")}"`;
   return line;
 }
 
@@ -102,7 +120,15 @@ export function buildDelta(action: string, before: ScanResult | null, after: Sca
     const oldAlerts = new Set(before.alerts ?? []);
     const newAlerts = (after.alerts ?? []).filter((a) => !oldAlerts.has(a));
     if (newAlerts.length) parts.push(`alert: ${newAlerts.map((a) => `"${a}"`).join(", ")}`);
-    if (!added.length && !gone && !changed.length && !newAlerts.length && before.dialog === after.dialog) parts.push("no visible change");
+    // Text the action added that no element line already shows (a status message, a result).
+    const oldLines = new Set(before.lines ?? []);
+    const shown = new Set([...after.elements.flatMap((e) => [e.name, e.value ?? ""]), ...newAlerts]);
+    const newText = (after.lines ?? []).filter((l) => !oldLines.has(l) && !shown.has(l));
+    if (newText.length) {
+      const quoted = newText.slice(0, DELTA_TEXT_LIMIT).map((l) => `"${l.slice(0, 80)}"`);
+      parts.push(`text: ${quoted.join(", ")}${newText.length > DELTA_TEXT_LIMIT ? ", …" : ""}`);
+    }
+    if (!added.length && !gone && !changed.length && !newAlerts.length && !newText.length && before.dialog === after.dialog) parts.push("no visible change");
   }
   return parts.join(" | ");
 }

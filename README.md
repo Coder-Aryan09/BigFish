@@ -15,7 +15,7 @@ Working end to end on a real browser: sign in, connect, run an agent prompt, use
 | Monorepo, workspace, TypeScript config | Done |
 | Server: `/health`, Google login, `/mcp-ws` (extension is the MCP server, server is the MCP client) | Running |
 | Server: device sessions per user (max 3), tool calls one at a time per device | Running |
-| Server: agent (LangGraph plan, act, verify, finalize on Mistral), SSE run API with cancel | Running |
+| Server: agent (LangGraph plan, act, verify, finalize on NVIDIA, OpenRouter or Mistral), SSE run API with cancel | Running |
 | Server: TinyFish cloud research | Not built yet |
 | Extension: Google sign-in, MCP connection with reconnect, side panel account bar | Running |
 | Extension: 13 browser tools, refs + deltas, PII vault, approvals (side panel or popup), URL policy | Running |
@@ -65,7 +65,13 @@ All live in `apps/server/.env`.
 |---|---|---|
 | `PORT` | `8787` | Server port. Read today |
 | `HOST` | `127.0.0.1` | Bind address. Keep it local. Read today |
-| `MISTRAL_API_KEY` | empty | Mistral key for the agent. Without it `/api/agent/invoke` answers 503 |
+| `NVIDIA_API_KEY` | empty | NVIDIA key (free at build.nvidia.com). When set, it is used before OpenRouter and Mistral |
+| `NVIDIA_MODEL` | `nvidia/nemotron-3.5-super-vl-120b-a12b` | NVIDIA model for the agent (must support tool calling) |
+| `NVIDIA_JUDGE_MODEL` | `nvidia/nemotron-3.5-lightning-30b-a3b` | NVIDIA model that checks each subtask |
+| `OPEN_ROUTER_API_KEY` | empty | OpenRouter key, used when no NVIDIA key is set |
+| `OPEN_ROUTER_MODEL` | `openai/gpt-6-luna` | OpenRouter model for the agent (must support tool calling) |
+| `OPEN_ROUTER_JUDGE_MODEL` | same as `OPEN_ROUTER_MODEL` | OpenRouter model that checks each subtask |
+| `MISTRAL_API_KEY` | empty | Mistral key, used when no OpenRouter key is set. With neither key, `/api/agent/invoke` answers 503 |
 | `AGENT_MODEL` | `mistral-medium-latest` | Mistral model for the agent (must support tool calling) |
 | `AGENT_JUDGE_MODEL` | `mistral-small-latest` | Cheaper model that checks each subtask |
 | `TINYFISH_API_KEY` | empty | TinyFish key for public web research. Used once the agent is built |
@@ -121,7 +127,8 @@ Run from the repo root.
 | `pnpm --filter @bigfish/extension zip` | Zip the extension for upload |
 | `pnpm --filter @bigfish/server test` | Server tests: MCP pipe, login, agent run loop (fake extension, scripted model) |
 | `pnpm --filter @bigfish/extension test` | Safety unit tests: PII, rehydration, action and URL policy |
-| `pnpm --filter @bigfish/extension e2e` | Playwright E2E: Chromium + built extension + server + fixture pages. First run: `pnpm --filter @bigfish/extension exec playwright install chromium` |
+| `pnpm --filter @bigfish/extension e2e` | Playwright E2E: Chromium + built extension + server + fixture pages, incl. tool edge cases (`tools-edge.spec.ts`). First run: `pnpm --filter @bigfish/extension exec playwright install chromium` |
+| `NVIDIA_API_KEY=... pnpm --filter @bigfish/extension exec tsx e2e/agent-eval.ts [case...]` | Agent evals with the real model on fixture pages (forms, shop, table, mail, chat). Needs the e2e build (run `e2e` once). Traces go to `test-results/agent-eval/` |
 
 ## ML (optional)
 

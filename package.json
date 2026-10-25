@@ -11,6 +11,7 @@
   "scripts": {
     "dev:server": "pnpm --filter @bigfish/server dev",
     "dev:ext": "pnpm --filter @bigfish/extension dev",
+    "dev:ml": "uv --directory ML run python -m ML.src.server",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck"
   }

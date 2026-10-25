@@ -12,9 +12,20 @@ const AADHAAR_REGEX = /(?<![\d-])[2-9]\d{3}[\s-]?\d{4}[\s-]?\d{4}(?![\d-])/g;
 const CARD_REGEX = /(?<![\w/=?&#.:%-])\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{3,4}(?![\w-])/g;
 const SSN_REGEX = /(?<![\d-])\d{3}-\d{2}-\d{4}(?![\d-])/g;
 
+// URLs must never be tokenized or sanitized, as the agent must navigate to and test them directly.
+const URL_REGEX = /\bhttps?:\/\/[^\s<>"'{}|\\^`]+|\bwww\.[^\s<>"'{}|\\^`]+/gi;
+
 export function sanitizeObservationForModel(text: string, origin: string): string {
   if (!text) return text;
-  let sanitized = text;
+
+  // Protect all URLs so links, navigation targets, and test endpoints are never mangled by PII regexes.
+  const urlMap: Map<string, string> = new Map();
+  let counter = 0;
+  let sanitized = text.replace(URL_REGEX, (url) => {
+    const placeholder = `__BIGFISH_PRESERVED_URL_${counter++}__`;
+    urlMap.set(placeholder, url);
+    return placeholder;
+  });
 
   sanitized = sanitized.replace(EMAIL_REGEX, (match) => vault.tokenize("email", match, origin));
   sanitized = sanitized.replace(PAN_REGEX, (match) => vault.tokenize("pan", match, origin));
@@ -22,6 +33,11 @@ export function sanitizeObservationForModel(text: string, origin: string): strin
   sanitized = sanitized.replace(AADHAAR_REGEX, (match) => (verhoeffValid(match) ? vault.tokenize("aadhaar", match, origin) : match));
   sanitized = sanitized.replace(SSN_REGEX, (match) => vault.tokenize("ssn", match, origin));
   sanitized = sanitized.replace(PHONE_REGEX, (match) => vault.tokenize("phone", match, origin));
+
+  // Restore protected URLs untouched.
+  for (const [placeholder, originalUrl] of urlMap.entries()) {
+    sanitized = sanitized.replace(placeholder, originalUrl);
+  }
 
   return sanitized;
 }
